@@ -16,7 +16,7 @@ def resolve(path: tuple[str, ...]) -> str:
     raise CliError(
         code=EXIT_USER_ERROR,
         message=f"no explain entry for: {display}",
-        remediation="list entries with: jetson-orin-cli explain jetson-orin-cli",
+        remediation="list entries with: orin explain orin",
     )
 
 

@@ -70,8 +70,9 @@ def _build_parser() -> argparse.ArgumentParser:
     from jetson_orin.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
-        prog="jetson-orin-cli",
-        description="jetson-orin-cli — a clonable template for AgentCulture mesh agents.",
+        prog="orin",
+        description="orin — the jetson-orin-cli agent's command surface "
+        "(a clonable template for AgentCulture mesh agents).",
     )
     parser.add_argument(
         "--version",
