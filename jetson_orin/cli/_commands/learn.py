@@ -67,7 +67,7 @@ def _as_json_payload() -> dict[str, object]:
             "2": "environment/setup error",
         },
         "json_support": True,
-        "explain_pointer": "orin explain <path>",
+        "explain_pointer": "orin explain <path>...",
     }
 
 

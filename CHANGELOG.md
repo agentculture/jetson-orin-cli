@@ -21,6 +21,13 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `learn --json` `tool` field), and the import package stays `jetson_orin`.
   `explain jetson-orin-cli` is retained as a legacy alias of `explain orin`.
 
+  **Breaking (console command):** the previously-installed `jetson-orin` script
+  is removed — this is a deliberate clean break, not a deprecation. There is no
+  `jetson-orin` alias. Migrate any invocation to `orin <verb>` (or
+  `python -m jetson_orin <verb>`). Low blast radius: `jetson-orin` was never
+  documented (every doc/help string referenced the non-functional
+  `jetson-orin-cli`), and the package is pre-1.0 alpha.
+
 ### Added
 
 - **Initialized `CLAUDE.md`** from the seed placeholder via `/init`: documents
