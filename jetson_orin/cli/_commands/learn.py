@@ -1,4 +1,4 @@
-"""``jetson-orin-cli learn`` — the learnability affordance.
+"""``orin learn`` — the learnability affordance.
 
 Prints a structured self-teaching prompt. Must satisfy the agent-first rubric:
 >=200 chars and mention purpose, command map, exit codes, --json, and explain.
@@ -23,12 +23,12 @@ rename the package, and edit culture.yaml to mint a new agent.
 
 Commands
 --------
-  jetson-orin-cli whoami             Identity from culture.yaml.
-  jetson-orin-cli learn              This self-teaching prompt.
-  jetson-orin-cli explain <path>...  Markdown docs for any noun/verb path.
-  jetson-orin-cli overview           Descriptive snapshot of the agent.
-  jetson-orin-cli doctor             Check the agent-identity invariants.
-  jetson-orin-cli cli overview       Describe the CLI surface itself.
+  orin whoami             Identity from culture.yaml.
+  orin learn              This self-teaching prompt.
+  orin explain <path>...  Markdown docs for any noun/verb path.
+  orin overview           Descriptive snapshot of the agent.
+  orin doctor             Check the agent-identity invariants.
+  orin cli overview       Describe the CLI surface itself.
 
 Machine-readable output
 -----------------------
@@ -44,7 +44,7 @@ Exit-code policy
 
 More detail
 -----------
-  jetson-orin-cli explain jetson-orin-cli
+  orin explain orin
 """
 
 
@@ -67,7 +67,7 @@ def _as_json_payload() -> dict[str, object]:
             "2": "environment/setup error",
         },
         "json_support": True,
-        "explain_pointer": "jetson-orin-cli explain <path>",
+        "explain_pointer": "orin explain <path>...",
     }
 
 

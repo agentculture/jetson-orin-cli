@@ -21,7 +21,7 @@ def test_version_flag(capsys: pytest.CaptureFixture[str]) -> None:
 def test_no_args_prints_help(capsys: pytest.CaptureFixture[str]) -> None:
     rc = main([])
     assert rc == 0
-    assert "usage: jetson-orin-cli" in capsys.readouterr().out
+    assert "usage: orin" in capsys.readouterr().out
 
 
 def test_unknown_command_errors(capsys: pytest.CaptureFixture[str]) -> None:
@@ -83,7 +83,7 @@ def test_learn_json(capsys: pytest.CaptureFixture[str]) -> None:
 def test_explain_root(capsys: pytest.CaptureFixture[str]) -> None:
     rc = main(["explain"])
     assert rc == 0
-    assert "# jetson-orin-cli" in capsys.readouterr().out
+    assert "# orin" in capsys.readouterr().out
 
 
 def test_explain_self(capsys: pytest.CaptureFixture[str]) -> None:
@@ -97,7 +97,7 @@ def test_explain_json(capsys: pytest.CaptureFixture[str]) -> None:
     assert rc == 0
     payload = json.loads(capsys.readouterr().out)
     assert payload["path"] == ["whoami"]
-    assert "jetson-orin-cli whoami" in payload["markdown"]
+    assert "orin whoami" in payload["markdown"]
 
 
 def test_explain_unknown_path_errors(capsys: pytest.CaptureFixture[str]) -> None:

@@ -19,10 +19,13 @@ Agent and CLI for operating NVIDIA Jetson Orin edge-AI devices (Orin Nano/NX/AGX
 ```bash
 uv sync
 uv run pytest -n auto                 # run the test suite
-uv run jetson-orin-cli whoami  # identity from culture.yaml
-uv run jetson-orin-cli learn   # self-teaching prompt (add --json)
+uv run orin whoami                    # identity from culture.yaml
+uv run orin learn                     # self-teaching prompt (add --json)
 uv run teken cli doctor . --strict    # the agent-first rubric gate CI runs
 ```
+
+> The `jetson-orin-cli` package installs a single console command named
+> **`orin`** (run it as `uv run orin <verb>` or `python -m jetson_orin <verb>`).
 
 ## CLI
 
@@ -41,9 +44,9 @@ error, `3+` reserved.
 
 ## Make it your own
 
-1. Rename the package `jetson_orin/` and the `jetson-orin-cli`
-   CLI/dist name throughout `pyproject.toml`, the package, `tests/`,
-   `sonar-project.properties`, and this `README.md`. The name is hard-coded in
+1. Rename the import package `jetson_orin/`, the `jetson-orin-cli` dist name, and
+   the `orin` console command throughout `pyproject.toml`, the package, `tests/`,
+   `sonar-project.properties`, and this `README.md`. The names are hard-coded in
    ~100 places, so list every occurrence first — see the `git grep` discovery
    command in [`CLAUDE.md`](CLAUDE.md), the authoritative rename procedure.
 2. Edit `culture.yaml` with your `suffix` and `backend`.

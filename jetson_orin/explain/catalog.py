@@ -1,7 +1,8 @@
-"""Markdown catalog for ``jetson-orin-cli explain <path>``.
+"""Markdown catalog for ``orin explain <path>``.
 
-Each entry is verbatim markdown. Keys are command-path tuples. The empty tuple
-and ``("jetson-orin-cli",)`` both resolve to the root entry.
+Each entry is verbatim markdown. Keys are command-path tuples. The empty tuple,
+``("orin",)``, and the legacy ``("jetson-orin-cli",)`` alias all resolve to the
+root entry.
 
 Keep bodies self-contained: an agent reading one entry should get enough
 context without chaining reads.
@@ -10,22 +11,22 @@ context without chaining reads.
 from __future__ import annotations
 
 _ROOT = """\
-# jetson-orin-cli
+# orin
 
-A clonable template for AgentCulture mesh agents. It carries an agent-first CLI
-(cited from the teken `python-cli` reference), a mesh identity (`culture.yaml` +
-`CLAUDE.md`), the canonical guildmaster skill kit under `.claude/skills/`, and a
-buildable/deployable package baseline. Clone it, rename the package, edit
-`culture.yaml`, and you have a new agent.
+`orin` is the command installed by the **jetson-orin-cli** package — an
+agent-first CLI (cited from the teken `python-cli` reference) for an AgentCulture
+mesh agent. It carries a mesh identity (`culture.yaml` + the resident prompt
+file), the canonical guildmaster skill kit under `.claude/skills/`, and a
+buildable/deployable package baseline.
 
 ## Verbs
 
-- `jetson-orin-cli whoami` — identity probe from `culture.yaml`.
-- `jetson-orin-cli learn` — structured self-teaching prompt.
-- `jetson-orin-cli explain <path>` — markdown docs for any noun/verb.
-- `jetson-orin-cli overview` — descriptive snapshot of the agent.
-- `jetson-orin-cli doctor` — check the agent-identity invariants.
-- `jetson-orin-cli cli overview` — describe the CLI surface.
+- `orin whoami` — identity probe from `culture.yaml`.
+- `orin learn` — structured self-teaching prompt.
+- `orin explain <path>` — markdown docs for any noun/verb.
+- `orin overview` — descriptive snapshot of the agent.
+- `orin doctor` — check the agent-identity invariants.
+- `orin cli overview` — describe the CLI surface.
 
 ## Exit-code policy
 
@@ -36,49 +37,49 @@ buildable/deployable package baseline. Clone it, rename the package, edit
 
 ## See also
 
-- `jetson-orin-cli explain whoami`
-- `jetson-orin-cli explain doctor`
+- `orin explain whoami`
+- `orin explain doctor`
 """
 
 _WHOAMI = """\
-# jetson-orin-cli whoami
+# orin whoami
 
 Reports the agent's identity from `culture.yaml`: nick (`suffix`), backend,
 served model, and the package version. Read-only.
 
 ## Usage
 
-    jetson-orin-cli whoami
-    jetson-orin-cli whoami --json
+    orin whoami
+    orin whoami --json
 """
 
 _LEARN = """\
-# jetson-orin-cli learn
+# orin learn
 
 Prints a structured self-teaching prompt covering purpose, command map,
 exit-code policy, `--json` support, and the `explain` pointer.
 
 ## Usage
 
-    jetson-orin-cli learn
-    jetson-orin-cli learn --json
+    orin learn
+    orin learn --json
 """
 
 _EXPLAIN = """\
-# jetson-orin-cli explain <path>
+# orin explain <path>
 
 Prints markdown documentation for any noun/verb path. Unlike `--help` (terse,
 positional), `explain` is global and addressable by path.
 
 ## Usage
 
-    jetson-orin-cli explain jetson-orin-cli
-    jetson-orin-cli explain whoami
-    jetson-orin-cli explain --json <path>
+    orin explain orin
+    orin explain whoami
+    orin explain --json <path>
 """
 
 _OVERVIEW = """\
-# jetson-orin-cli overview
+# orin overview
 
 Read-only descriptive snapshot of the agent: identity (from `culture.yaml`), the
 verb surface, and the sibling-pattern artifacts the template carries. Accepts an
@@ -86,12 +87,12 @@ ignored `target` so a stray path never hard-fails.
 
 ## Usage
 
-    jetson-orin-cli overview
-    jetson-orin-cli overview --json
+    orin overview
+    orin overview --json
 """
 
 _DOCTOR = """\
-# jetson-orin-cli doctor
+# orin doctor
 
 Checks the agent-identity invariants `steward doctor` verifies:
 prompt-file-present and backend-consistency (`colleague` → `AGENTS.colleague.md`), plus a
@@ -99,26 +100,27 @@ skills-present check. Exits 1 when unhealthy.
 
 ## Usage
 
-    jetson-orin-cli doctor
-    jetson-orin-cli doctor --json
+    orin doctor
+    orin doctor --json
 """
 
 _CLI = """\
-# jetson-orin-cli cli
+# orin cli
 
 Noun group for CLI-surface introspection. `cli overview` describes the CLI
 itself (distinct from the global `overview`, which describes the agent).
 
 ## Usage
 
-    jetson-orin-cli cli overview
-    jetson-orin-cli cli overview --json
+    orin cli overview
+    orin cli overview --json
 """
 
 
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
-    ("jetson-orin-cli",): _ROOT,
+    ("orin",): _ROOT,
+    ("jetson-orin-cli",): _ROOT,  # legacy alias
     ("whoami",): _WHOAMI,
     ("learn",): _LEARN,
     ("explain",): _EXPLAIN,

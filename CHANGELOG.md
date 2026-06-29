@@ -5,6 +5,36 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-06-29
+
+### Changed
+
+- **Renamed the console command to `orin`.** `[project.scripts]` previously
+  installed the command as `jetson-orin`, but every other surface — the argparse
+  `prog`, `--help`/`usage:` text, the `learn` command map, the `explain` catalog
+  headings and usage blocks, and the tests — said `jetson-orin-cli`, a command
+  that did not exist (running it errored with "Failed to spawn"). Picked a
+  single short command name, `orin`, and aligned the whole command surface on it
+  (`prog`, `learn`, `explain`, `overview`/`cli overview` subjects, `doctor`
+  header, README quickstart). The packaging/identity name stays `jetson-orin-cli`
+  (PyPI dist, SonarCloud key, the `culture.yaml` `suffix`/`whoami` nick, the
+  `learn --json` `tool` field), and the import package stays `jetson_orin`.
+  `explain jetson-orin-cli` is retained as a legacy alias of `explain orin`.
+
+  **Breaking (console command):** the previously-installed `jetson-orin` script
+  is removed — this is a deliberate clean break, not a deprecation. There is no
+  `jetson-orin` alias. Migrate any invocation to `orin <verb>` (or
+  `python -m jetson_orin <verb>`). Low blast radius: `jetson-orin` was never
+  documented (every doc/help string referenced the non-functional
+  `jetson-orin-cli`), and the package is pre-1.0 alpha.
+
+### Added
+
+- **Initialized `CLAUDE.md`** from the seed placeholder via `/init`: documents
+  the three-names distinction, the agent-first error/stream/exit-code contracts,
+  the command/noun/explain-catalog wiring, the identity (`doctor`) model, the
+  CI/version-bump workflow, and the add-a-verb and rename procedures.
+
 ## [0.4.0] - 2026-06-23
 
 ### Added
