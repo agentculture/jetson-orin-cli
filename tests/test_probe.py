@@ -9,6 +9,8 @@ from __future__ import annotations
 
 from types import SimpleNamespace
 
+import pytest
+
 from jetson_orin.probe import (
     _run,
     containers,
@@ -275,6 +277,42 @@ def test_gpu_unavailable_without_nvidia_smi(tmp_path) -> None:
     assert rep["remediation"]
 
 
+def _no_sysfs(tmp_path) -> dict:
+    # Empty sysfs roots, so the collector cannot fall back to the real board.
+    return {
+        "devfreq_root": str(tmp_path / "no-devfreq"),
+        "thermal_root": str(tmp_path / "no-thermal"),
+        "hwmon_root": str(tmp_path / "no-hwmon"),
+    }
+
+
+def test_gpu_unavailable_reason_not_installed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(gpu.shutil, "which", lambda _n: None)
+    rep = gpu.collect(runner=lambda _n, _a: None, **_no_sysfs(tmp_path))
+    assert rep["reason"] == "not_installed"
+
+
+def test_gpu_unavailable_reason_failed_when_tool_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr(gpu.shutil, "which", lambda n: f"/usr/bin/{n}")
+    rep = gpu.collect(runner=lambda _n, _a: None, **_no_sysfs(tmp_path))
+    assert rep["reason"] == "failed"
+
+
+def test_gpu_unavailable_reason_failed_when_sysfs_node_unreadable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # No nvidia-smi, but the GPU devfreq node exists with nothing readable in
+    # it: the GPU is present and its probe failed, not "not installed".
+    monkeypatch.setattr(gpu.shutil, "which", lambda _n: None)
+    roots = _no_sysfs(tmp_path)
+    (tmp_path / "no-devfreq" / "17000000.gpu").mkdir(parents=True)
+    rep = gpu.collect(runner=lambda _n, _a: None, **roots)
+    assert rep["available"] is False
+    assert rep["reason"] == "failed"
+
+
 # --- network --------------------------------------------------------------
 
 _ADDR = """\
@@ -336,6 +374,34 @@ def test_containers_flags_unhealthy_and_gpu() -> None:
 def test_containers_unavailable_without_docker() -> None:
     rep = containers.collect(runner=lambda _n, _a: None)
     assert rep["available"] is False
+
+
+def test_containers_unavailable_reason_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(containers.shutil, "which", lambda _n: None)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["available"] is False
+    assert rep["reason"] == "not_installed"
+
+
+def test_containers_unavailable_reason_not_permitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    # docker is installed and its socket exists, but this user may not use it
+    # (not in the docker group).
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr(containers.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(containers.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(containers.os, "access", lambda _p, _m: False)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["reason"] == "not_permitted"
+
+
+def test_containers_unavailable_reason_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Installed and permitted, yet `docker ps` fails: a genuine probe failure.
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr(containers.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(containers.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(containers.os, "access", lambda _p, _m: True)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["reason"] == "failed"
 
 
 # --- status (aggregator) --------------------------------------------------

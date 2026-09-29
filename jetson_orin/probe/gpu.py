@@ -30,11 +30,18 @@ nvidia-smi produced nothing at all).
 from __future__ import annotations
 
 import csv
+import shutil
 from pathlib import Path
 from typing import Optional
 
 from jetson_orin.probe import _run
-from jetson_orin.probe._report import human_bytes, report, unavailable
+from jetson_orin.probe._report import (
+    REASON_FAILED,
+    REASON_NOT_INSTALLED,
+    human_bytes,
+    report,
+    unavailable,
+)
 from jetson_orin.probe._run import Runner, default_runner
 
 _HOT_C = 80.0
@@ -262,6 +269,30 @@ def _sysfs_power_for_label(hwmon_root: Path, label: str) -> Optional[float]:
     return None
 
 
+def _sysfs_gpu_nodes_present(devfreq_root: Path, thermal_root: Path) -> bool:
+    """True when a GPU devfreq node or a GPU thermal zone exists (readable or not)."""
+    if devfreq_root.is_dir() and any(devfreq_root.glob("*gpu*")):
+        return True
+    if thermal_root.is_dir():
+        for zdir in thermal_root.glob("thermal_zone*"):
+            if "gpu" in (_run.read_first_line(zdir / "type") or "").lower():
+                return True
+    return False
+
+
+def _unavailable_reason(devfreq_root: Path, thermal_root: Path) -> str:
+    """Why neither nvidia-smi nor sysfs produced a GPU report.
+
+    ``not_installed`` only when nvidia-smi is not on PATH *and* no GPU sysfs
+    node exists; otherwise something that is present failed (``failed``).
+    """
+    if shutil.which("nvidia-smi") is None and not _sysfs_gpu_nodes_present(
+        devfreq_root, thermal_root
+    ):
+        return REASON_NOT_INSTALLED
+    return REASON_FAILED
+
+
 def _sysfs_fallback(devfreq_root: Path, thermal_root: Path, hwmon_root: Path) -> dict:
     clock_mhz, clock_pct = _sysfs_clock_mhz(devfreq_root)
     return {
@@ -338,6 +369,7 @@ def collect(
                 "nvidia-smi, sysfs",
                 "install NVIDIA drivers / run on Jetson Orin "
                 "(with devfreq + hwmon nodes present)",
+                reason=_unavailable_reason(Path(devfreq_root), Path(thermal_root)),
             )
         return _sysfs_report(sysfs)
 
