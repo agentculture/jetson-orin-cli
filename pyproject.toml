@@ -1,6 +1,6 @@
 [project]
 name = "jetson-orin-cli"
-version = "0.5.0"
+version = "0.6.0"
 description = "Agent and CLI for operating NVIDIA Jetson Orin edge-AI devices (Orin Nano/NX/AGX) — provisioning, inference, and on-device ops."
 readme = "README.md"
 license = "Apache-2.0"

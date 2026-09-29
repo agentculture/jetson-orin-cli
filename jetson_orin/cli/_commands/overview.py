@@ -1,7 +1,7 @@
 """``orin overview`` — read-only descriptive snapshot of the agent.
 
 Describes the agent to an agent reader: identity (from culture.yaml), the verb
-surface, and the sibling-pattern artifacts this template carries. The shared
+surface, and the sibling-pattern artifacts this agent carries. The shared
 section/render helpers here are reused by the ``cli`` noun's ``overview`` (see
 :mod:`jetson_orin.cli._commands.cli`).
 
@@ -38,6 +38,9 @@ _VERBS = [
     "containers — running Docker containers and health",
     "network — interfaces, routes, reachable addresses",
     "processes — top processes by resident memory",
+    "power — nvpmodel mode, jetson_clocks state, per-rail power",
+    "swap — swap status, per-process history, guarded grow",
+    "monitor — AI-free threshold watchdog that webhooks on alerts",
 ]
 
 

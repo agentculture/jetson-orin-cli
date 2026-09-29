@@ -22,6 +22,7 @@ VERBS = [
     "containers",
     "network",
     "processes",
+    "power",
 ]
 
 

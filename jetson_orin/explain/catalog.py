@@ -13,11 +13,11 @@ from __future__ import annotations
 _ROOT = """\
 # orin
 
-`orin` is the command installed by the **jetson-orin-cli** package — an
-agent-first CLI (cited from the teken `python-cli` reference) for an AgentCulture
-mesh agent. It carries a mesh identity (`culture.yaml` + the resident prompt
-file), the canonical guildmaster skill kit under `.claude/skills/`, and a
-buildable/deployable package baseline.
+`orin` is the command installed by the **jetson-orin-cli** package — the device
+CLI for the NVIDIA Jetson AGX Orin: an agent-first CLI (cited from the teken
+`python-cli` reference) for an AgentCulture mesh agent. It carries a mesh
+identity (`culture.yaml` + the resident prompt file), the canonical guildmaster
+skill kit under `.claude/skills/`, and a buildable/deployable package baseline.
 
 ## Verbs
 
@@ -39,6 +39,7 @@ buildable/deployable package baseline.
 - `orin containers` — running Docker containers and health.
 - `orin network` — interfaces, default route, reachable addresses.
 - `orin processes` — top processes by resident memory.
+- `orin power` — nvpmodel mode, jetson_clocks state, per-rail power draw.
 - `orin swap` — swap status, per-process history, guarded grow.
 - `orin monitor` — deterministic, AI-free threshold watchdog that webhooks on
   catastrophes.
@@ -100,7 +101,7 @@ _OVERVIEW = """\
 # orin overview
 
 Read-only descriptive snapshot of the agent: identity (from `culture.yaml`), the
-verb surface, and the sibling-pattern artifacts the template carries. Accepts an
+verb surface, and the sibling-pattern artifacts the agent carries. Accepts an
 ignored `target` so a stray path never hard-fails.
 
 ## Usage
@@ -263,6 +264,30 @@ skipped.
     orin processes --json
 """
 
+
+_POWER = """\
+# orin power
+
+Jetson AGX Orin power posture from three independent sources:
+
+- `nvpmodel -q` — the active power mode (e.g. `MAXN`, id `0`). Readable without
+  root.
+- `jetson_clocks --show` — whether CPU/GPU clocks are pinned to max. Requires
+  root; without it the field reports `available: false` with a remediation.
+  `orin power` never runs `jetson_clocks` without `--show` and never changes the
+  power mode.
+- `ina3221` power monitors under `/sys/class/hwmon` — per-rail telemetry
+  (`VDD_GPU_SOC`, `VDD_CPU_CV`, `VIN_SYS_5V0`, `VDDQ_VDD2_1V8AO`) computed as
+  mV x mA; needs no privilege. Unlabelled channels are not reported.
+
+Each source is read independently; the report is only `unavailable` when none of
+them yielded anything. Read-only; exits 0.
+
+## Usage
+
+    orin power
+    orin power --json
+"""
 
 _MONITOR = """\
 # orin monitor
@@ -536,6 +561,7 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("monitor", "status"): _MONITOR_SYSTEMD,
     ("monitor", "uninstall"): _MONITOR_SYSTEMD,
     ("swap",): _SWAP,
+    ("power",): _POWER,
     ("swap", "overview"): _SWAP_OVERVIEW,
     ("swap", "status"): _SWAP_STATUS,
     ("swap", "grow"): _SWAP_GROW,

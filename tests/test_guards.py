@@ -1,6 +1,6 @@
-"""Repo-wide guard tests: the hard invariants behind the 0.5.0 machine-scope front.
+"""Repo-wide guard tests: the hard invariants behind the Jetson Orin device CLI.
 
-These pin the boundary claims of the spec (docs/specs/2026-07-13-…machine-scope…):
+These pin the boundary claims of the machine-scope surface:
 zero runtime dependencies (stdlib-only imports everywhere under ``jetson_orin``),
 and the agent-first output contract (results to stdout, stderr clean on success,
 ``--json`` payloads parse) for every read-only verb of the new surface.
@@ -64,6 +64,7 @@ _READ_ONLY_ARGS = [
     ["containers"],
     ["network"],
     ["processes"],
+    ["power"],
     ["whoami"],
     ["learn"],
     ["overview"],

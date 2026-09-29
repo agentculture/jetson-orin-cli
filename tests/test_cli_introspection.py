@@ -104,3 +104,41 @@ def test_doctor_recognizes_declared_backend(capsys: pytest.CaptureFixture[str]) 
     assert "unknown backend" not in messages
     assert rc == 0
     assert payload["healthy"] is True
+
+
+def _all_verb_paths() -> list[list[str]]:
+    import argparse
+
+    from jetson_orin.cli import _build_parser
+
+    def walk(parser, prefix):
+        out = []
+        for action in parser._actions:
+            if isinstance(action, argparse._SubParsersAction):
+                for name, sp in action.choices.items():
+                    out.append(prefix + [name])
+                    out.extend(walk(sp, prefix + [name]))
+        return out
+
+    return walk(_build_parser(), [])
+
+
+def test_learn_and_overview_list_every_top_level_verb(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    import json
+
+    tops = sorted({p[0] for p in _all_verb_paths()})
+    assert {"swap", "monitor", "power"} <= set(tops)
+    assert main(["learn"]) == 0
+    text = capsys.readouterr().out
+    assert main(["learn", "--json"]) == 0
+    learn_paths = {c["path"][0] for c in json.loads(capsys.readouterr().out)["commands"]}
+    assert main(["overview"]) == 0
+    overview = capsys.readouterr().out
+    for verb in tops:
+        assert f"orin {verb}" in text, f"learn text missing {verb}"
+        assert verb in learn_paths, f"learn --json missing {verb}"
+        if verb != "cli":  # `cli overview` is listed by the cli noun, not agent overview
+            assert f"- {verb} " in overview, f"overview missing {verb}"
+    assert "clonable" not in text.lower()

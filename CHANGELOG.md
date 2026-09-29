@@ -5,6 +5,31 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-09-29
+
+### Added
+
+- **Machine-scope probe verbs** ported from jetson-thor-cli and adapted to the
+  AGX Orin: `status` (seven subsystems, anomalies first), `memory`, `gpu`,
+  `disk`, `thermal`, `containers`, `network`, `processes`. All read-only,
+  `--json`, and exit 0 with `available: false` plus a remediation when a
+  subsystem is absent. `gpu` backfills nvidia-smi's `[N/A]` fields from sysfs.
+- **`orin swap`** (status, history, sample, grow): swap inspection with a
+  guarded grow.
+- **`orin monitor`**: deterministic, AI-free threshold watchdog with webhook
+  delivery and systemd `--user` install.
+- **`orin power`**: `nvpmodel -q` mode (`data.nvpmodel {mode, mode_id, raw}`),
+  `jetson_clocks --show` state (root-only: reports `available: false` with a
+  remediation for a normal user, never guessed), and `ina3221` hwmon rails
+  (`data.rails [{label, power_mw}]`; measured on L4T R39.2.0: `VDD_GPU_SOC`,
+  `VDD_CPU_CV`, `VIN_SYS_5V0`, `VDDQ_VDD2_1V8AO`). It never changes power state.
+
+### Changed
+
+- The root `--help`, `learn` (text and JSON), `overview`, `whoami` and `explain`
+  no longer describe a "clonable template"; they describe the Jetson Orin device
+  CLI and list every verb, including `swap`, `monitor` and `power`.
+
 ## [0.5.0] - 2026-06-29
 
 ### Changed

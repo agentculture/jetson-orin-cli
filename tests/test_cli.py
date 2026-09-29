@@ -113,3 +113,12 @@ def test_every_catalog_path_resolves(capsys: pytest.CaptureFixture[str]) -> None
         rc = main(["explain", *path])
         assert rc == 0, f"explain {' '.join(path)} failed"
         capsys.readouterr()
+
+
+def test_root_description_names_jetson_orin(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        main(["--help"])
+    out = capsys.readouterr().out
+    assert "clonable template" not in out
+    assert "Jetson Orin" in out
+    assert "power" in out

@@ -11,6 +11,7 @@ alongside ``whoami``/``doctor`` rather than under a noun:
     orin containers   running Docker containers + health
     orin network      interfaces, routes, reachable addresses
     orin processes    top processes by resident memory
+    orin power        nvpmodel mode, jetson_clocks state, per-rail power draw
 
 Each is a thin ``--json``-supporting leaf verb backed by a collector in
 :mod:`jetson_orin.probe` (see :mod:`jetson_orin.cli._commands._probe`). All are
@@ -29,6 +30,7 @@ from jetson_orin.probe import (
     gpu,
     memory,
     network,
+    power,
     processes,
     status,
     thermal,
@@ -44,6 +46,7 @@ _VERBS = [
     ("containers", containers.collect, "Running Docker containers and their health."),
     ("network", network.collect, "Interfaces, default route, and reachable addresses."),
     ("processes", processes.collect, "Top processes by resident memory."),
+    ("power", power.collect, "nvpmodel mode, jetson_clocks state, and per-rail power draw."),
 ]
 
 

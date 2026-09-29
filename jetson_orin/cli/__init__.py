@@ -75,7 +75,7 @@ def _build_parser() -> argparse.ArgumentParser:
     parser = _CliArgumentParser(
         prog="orin",
         description="orin — the jetson-orin-cli agent's command surface "
-        "(a clonable template for AgentCulture mesh agents).",
+        "(a Jetson Orin device CLI: host telemetry, swap, monitor and power for the AGX Orin).",
     )
     parser.add_argument(
         "--version",
