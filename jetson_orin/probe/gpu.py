@@ -304,6 +304,24 @@ def _sysfs_fallback(devfreq_root: Path, thermal_root: Path, hwmon_root: Path) ->
     }
 
 
+def _num_str(value: Optional[float], digits: int) -> Optional[str]:
+    return f"{value:.{digits}f}" if value is not None else None
+
+
+def _smi_shaped(sysfs: dict) -> dict:
+    """The nvidia-smi-keyed view of a sysfs reading, formatted like the smi path.
+
+    ``monitor`` (``rules._gpu``) and ``status`` (``_gpu_line``) read these keys,
+    so a report built from sysfs alone must carry them too; ``None`` = unknown.
+    """
+    return {
+        _F_TEMP: _num_str(sysfs["temperature_c"], 1),
+        _F_POWER: _num_str(sysfs["power_w"], 2),
+        _F_CLOCK: _num_str(sysfs["clock_mhz"], 0),
+        _F_UTIL: _num_str(sysfs["utilization_pct"], 0),
+    }
+
+
 def _sysfs_report(sysfs: dict) -> dict:
     clock_item = f"clock: {_fmt_num(sysfs['clock_mhz'], ' MHz', 0)}"
     if sysfs["clock_pct_of_max"] is not None:
@@ -319,7 +337,8 @@ def _sysfs_report(sysfs: dict) -> dict:
     warnings = _warn_hot(
         f"{sysfs['temperature_c']}" if sysfs["temperature_c"] is not None else None
     )
-    data = {"gpu": sysfs, "compute_apps": [], "gpu_attributed_mib": 0}
+    # Keep the sysfs keys (temperature_c, ...) and add the nvidia-smi-shaped ones.
+    data = {"gpu": {**sysfs, **_smi_shaped(sysfs)}, "compute_apps": [], "gpu_attributed_mib": 0}
     return report("gpu", source="sysfs", sections=sections, warnings=warnings, data=data)
 
 

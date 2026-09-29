@@ -9,12 +9,13 @@ hwmon rails, and ``/etc/nv_tegra_release``).
 
 from __future__ import annotations
 
+from jetson_orin.monitor import rules
 from jetson_orin.probe import gpu, l4t, status
 
 # --- gpu: sysfs fixture builder --------------------------------------------
 
 
-def _write_gpu_sysfs(tmp_path, *, cur_hz="315000000", max_hz="1575000000"):
+def _write_gpu_sysfs(tmp_path, *, cur_hz="315000000", max_hz="1575000000", temp_mc="48406"):
     """Build devfreq/thermal/hwmon fixtures matching what Orin exposes live."""
     devfreq = tmp_path / "devfreq"
     (devfreq / "gpu-gpc-0").mkdir(parents=True)
@@ -24,7 +25,7 @@ def _write_gpu_sysfs(tmp_path, *, cur_hz="315000000", max_hz="1575000000"):
     thermal = tmp_path / "thermal"
     (thermal / "thermal_zone1").mkdir(parents=True)
     (thermal / "thermal_zone1" / "type").write_text("gpu-thermal\n")
-    (thermal / "thermal_zone1" / "temp").write_text("48406\n")
+    (thermal / "thermal_zone1" / "temp").write_text(temp_mc + "\n")
 
     hwmon = tmp_path / "hwmon"
     (hwmon / "hwmon5").mkdir(parents=True)
@@ -122,6 +123,42 @@ def test_gpu_absent_nvidia_smi_uses_sysfs(tmp_path) -> None:
     assert data["power_w"] is not None
     titles = [s["title"] for s in rep["sections"]]
     assert "GPU (sysfs)" in titles
+
+
+def _sysfs_only_report(tmp_path, **fixture) -> dict:
+    devfreq, thermal, hwmon = _write_gpu_sysfs(tmp_path, **fixture)
+    return gpu.collect(
+        runner=lambda _n, _a: None,
+        devfreq_root=devfreq,
+        thermal_root=thermal,
+        hwmon_root=hwmon,
+    )
+
+
+def test_gpu_sysfs_report_carries_nvidia_smi_shaped_keys(tmp_path) -> None:
+    # monitor and status read the nvidia-smi keys; a sysfs-built report must
+    # carry them too (formatted like the smi path), next to the sysfs keys.
+    rep = _sysfs_only_report(tmp_path)
+    data = rep["data"]["gpu"]
+    assert data["temperature.gpu"] == "48.4"
+    assert data["clocks.sm"] == "315"
+    assert data["power.draw"] is not None and float(data["power.draw"]) > 0
+    assert data["utilization.gpu"] is None  # no device/load node in this fixture
+    assert data["temperature_c"] == 48.406  # sysfs keys kept
+
+
+def test_monitor_gpu_temp_alert_fires_from_sysfs_only_report(tmp_path) -> None:
+    rep = _sysfs_only_report(tmp_path, temp_mc="95000")
+    out: list = []
+    rules._gpu({"gpu": rep["data"]}, {"gpu_temp_c": 87.0}, out)
+    assert [(a.key, a.severity) for a in out] == [("gpu_temp_c", "critical")]
+
+
+def test_status_gpu_line_shows_sysfs_temperature(tmp_path) -> None:
+    rep = _sysfs_only_report(tmp_path, temp_mc="95000")
+    line = status._gpu_line(rep["data"])
+    assert "95.0 C" in line
+    assert "n/a C" not in line
 
 
 def test_gpu_fully_degraded_when_neither_available(tmp_path) -> None:
