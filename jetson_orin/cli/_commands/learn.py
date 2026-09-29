@@ -30,6 +30,21 @@ Commands
   orin doctor             Check the agent-identity invariants.
   orin cli overview       Describe the CLI surface itself.
 
+Machine scope (Jetson Orin host telemetry)
+------------------------------------------
+  orin status             Machine-wide scope, anomalies first (the headline;
+                           includes the L4T version).
+  orin memory             Unified RAM + swap (CPU and iGPU share it).
+  orin gpu                Ampere iGPU: util, temp, power, processes
+                           (nvidia-smi backfilled from sysfs).
+  orin disk               Filesystem usage for real block devices.
+  orin thermal            SoC thermal zones and hwmon sensors.
+  orin containers         Running Docker containers and health.
+  orin network            Interfaces, routes, reachable addresses.
+  orin processes          Top processes by resident memory.
+These are read-only and exit 0 even when a subsystem is absent (the report
+carries available:false plus a remediation hint); doctor is the health gate.
+
 Machine-readable output
 -----------------------
 Every command supports --json. Errors in JSON mode emit
@@ -60,6 +75,14 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["overview"], "summary": "Descriptive snapshot of the agent."},
             {"path": ["doctor"], "summary": "Check the agent-identity invariants."},
             {"path": ["cli", "overview"], "summary": "Describe the CLI surface."},
+            {"path": ["status"], "summary": "Machine-wide scope, anomalies first."},
+            {"path": ["memory"], "summary": "Unified RAM + swap."},
+            {"path": ["gpu"], "summary": "Ampere iGPU snapshot."},
+            {"path": ["disk"], "summary": "Filesystem usage."},
+            {"path": ["thermal"], "summary": "SoC thermal zones and hwmon sensors."},
+            {"path": ["containers"], "summary": "Running Docker containers and health."},
+            {"path": ["network"], "summary": "Interfaces, routes, reachable addresses."},
+            {"path": ["processes"], "summary": "Top processes by resident memory."},
         ],
         "exit_codes": {
             "0": "success",

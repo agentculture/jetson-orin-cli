@@ -66,6 +66,7 @@ def _build_parser() -> argparse.ArgumentParser:
     from jetson_orin.cli._commands import doctor as _doctor_cmd
     from jetson_orin.cli._commands import explain as _explain_cmd
     from jetson_orin.cli._commands import learn as _learn_cmd
+    from jetson_orin.cli._commands import machine as _machine_cmd
     from jetson_orin.cli._commands import overview as _overview_cmd
     from jetson_orin.cli._commands import whoami as _whoami_cmd
 
@@ -89,6 +90,7 @@ def _build_parser() -> argparse.ArgumentParser:
     _overview_cmd.register(sub)
     _doctor_cmd.register(sub)
     _cli_group.register(sub)
+    _machine_cmd.register(sub)
     # Register your own noun groups here:
     #   from jetson_orin.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)
