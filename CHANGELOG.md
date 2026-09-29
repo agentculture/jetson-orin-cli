@@ -30,6 +30,29 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   no longer describe a "clonable template"; they describe the Jetson Orin device
   CLI and list every verb, including `swap`, `monitor` and `power`.
 
+### Fixed
+
+- `gpu`: a report built from sysfs (nvidia-smi missing or failing) also
+  carries `temperature.gpu`, `power.draw`, `clocks.sm` and `utilization.gpu`,
+  so the `gpu_temp_c` monitor alert and the GPU line of `status` work without
+  nvidia-smi.
+- `swap grow --apply`: a step that fails after `swapoff` now re-enables swap
+  (best-effort `swapon`) and reports the outcome.
+- `swap grow` targets the swapfile detected in `/proc/swaps`, not a fixed
+  `/swap.img`.
+- `monitor config --init` refuses to overwrite an existing `monitor.json`
+  unless `--force` is given.
+- `monitor.json` is written mode 0600, in a directory created 0700.
+- The `subsystem_down` monitor rule no longer fires for a subsystem that is not
+  installed or not permitted (e.g. no docker, or not in the docker group);
+  probes record the reason (`not_installed` / `not_permitted` / `failed`).
+- The fstab ensure step of `swap grow` matches an existing entry whatever its
+  whitespace, and never splices the path into shell code.
+- `disk` decodes `/proc/mounts` octal escapes without mangling UTF-8 mount
+  points.
+- `network` classifies `l4tbr0`, `usb*` and `rndis*` as `usb-gadget` and no
+  longer counts them (e.g. `192.168.55.1`) as reachable.
+
 ## [0.5.0] - 2026-06-29
 
 ### Changed
