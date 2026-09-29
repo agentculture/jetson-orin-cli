@@ -259,3 +259,22 @@ def test_gpu_orin_sysfs_only_reports_load(tmp_path) -> None:
     assert rep["source"] == "sysfs"
     assert rep["data"]["gpu"]["utilization_pct"] == 25.0
     assert rep["data"]["gpu"]["power_w"] is not None
+
+
+def test_gpu_util_backfilled_from_devfreq_when_smi_has_other_fields(tmp_path) -> None:
+    # nvidia-smi supplies temperature/power/clock but utilization is [N/A]:
+    # utilization must still come from devfreq load, and smi values stay.
+    devfreq, thermal, hwmon = _write_orin_gpu_sysfs(tmp_path, load="400")
+    line = "NVIDIA Orin, [N/A], [N/A], 55, 20.5, 60, [N/A], [N/A], 900, [N/A]\n"
+    rep = gpu.collect(
+        runner=_smi_runner(line),
+        devfreq_root=devfreq,
+        thermal_root=thermal,
+        hwmon_root=hwmon,
+    )
+    vals = rep["data"]["gpu"]
+    assert vals["utilization.gpu"] == "40"
+    assert vals["temperature.gpu"] == "55"
+    assert vals["clocks.sm"] == "900"
+    assert rep["data"]["sysfs_augmented_fields"] == ["utilization.gpu"]
+    assert rep["source"] == "nvidia-smi+sysfs"

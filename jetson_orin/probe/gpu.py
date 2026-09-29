@@ -358,8 +358,14 @@ def collect(
         sysfs_fields = _augment_from_sysfs(
             vals, Path(devfreq_root), Path(thermal_root), Path(hwmon_root)
         )
-        if sysfs_fields:
-            source = "nvidia-smi+sysfs"
+    elif vals[_F_UTIL] is None:
+        # smi gave some fields but not utilization: backfill only that.
+        load = _sysfs_load_pct(Path(devfreq_root))
+        if load is not None:
+            vals[_F_UTIL] = f"{load:.0f}"
+            sysfs_fields = [_F_UTIL]
+    if sysfs_fields:
+        source = "nvidia-smi+sysfs"
 
     sections = [
         {

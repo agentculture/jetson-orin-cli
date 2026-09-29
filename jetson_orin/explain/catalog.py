@@ -39,6 +39,9 @@ buildable/deployable package baseline.
 - `orin containers` — running Docker containers and health.
 - `orin network` — interfaces, default route, reachable addresses.
 - `orin processes` — top processes by resident memory.
+- `orin swap` — swap status, per-process history, guarded grow.
+- `orin monitor` — deterministic, AI-free threshold watchdog that webhooks on
+  catastrophes.
 
 All machine-scope verbs are read-only, support `--json`, and exit 0 even when a
 subsystem is absent (it reports `available: false`). `doctor` is the health gate.
@@ -261,6 +264,246 @@ skipped.
 """
 
 
+_MONITOR = """\
+# orin monitor
+
+A deterministic, **AI-free** watchdog. It periodically runs the
+`jetson_orin.probe` collectors, compares their numbers against configured
+thresholds, and POSTs to a generic webhook when a catastrophe condition
+crosses — and again when it clears (edge-triggered, so a standing condition
+doesn't spam). Designed to run always-on as a systemd `--user` service this
+CLI installs and manages.
+
+Watches: memory %, swap %, disk %, hottest sensor, GPU temp, load-per-core,
+I/O contention (iowait + blocked procs), container health, and subsystem
+availability (nvidia-smi / docker going dark).
+
+## Verbs
+
+- `monitor check` — evaluate now, print firing alerts (no webhook, no state).
+- `monitor once` — one cycle: evaluate, deliver transitions, update state.
+- `monitor run` — foreground watch loop (the systemd ExecStart).
+- `monitor test` — POST a synthetic alert to verify the webhook.
+- `monitor config [--init]` — show resolved config / write a scaffold.
+- `monitor install | enable | disable | status | uninstall` — systemd `--user`.
+
+## Config
+
+JSON at `~/.config/jetson-orin/monitor.json` (`JETSON_ORIN_WEBHOOK_URL`
+overrides the webhook). `webhook_format` is `generic` (default), `slack`, or
+`discord`. A numeric threshold of `null` disables that check. `notify_on_start`
+(default `true`) sends a one-shot "started watching" alert when `run` comes
+up. Zero runtime dependencies — `urllib` does the POST, never raising into
+the loop.
+
+## Usage
+
+    orin monitor check
+    orin monitor config
+"""
+
+_MONITOR_CHECK = """\
+# orin monitor check
+
+Evaluate the thresholds against a fresh snapshot and print the alerts that are
+currently firing. Does **not** POST to the webhook and does **not** touch the
+alert state — a safe dry run. Supports `--json` and `--config PATH`.
+
+## Usage
+
+    orin monitor check
+    orin monitor check --json
+"""
+
+_MONITOR_ONCE = """\
+# orin monitor once
+
+Run a single monitor cycle: snapshot, evaluate, and deliver any edge-triggered
+events (new alerts + recoveries) to the webhook, then persist the alert state.
+Cron-friendly. Exits 0; reports whether delivery happened. `--json`, `--config`.
+
+## Usage
+
+    orin monitor once
+"""
+
+_MONITOR_RUN = """\
+# orin monitor run
+
+The foreground watch loop — what the systemd unit runs as its `ExecStart`.
+Polls every `interval_seconds`, delivering transitions to the webhook; stops
+cleanly on SIGTERM/SIGINT. Requires a valid webhook (errors with exit 2
+otherwise). `--interval N` overrides the poll period; `--config PATH` selects
+the config.
+
+On start it POSTs a one-shot **"started watching"** liveness alert (so a
+watchdog that silently fails to come up is noticed). A failed startup POST is
+logged but never blocks the loop. Disable it with `notify_on_start: false` in
+the config.
+
+## Usage
+
+    orin monitor run
+    orin monitor run --interval 30
+"""
+
+_MONITOR_TEST = """\
+# orin monitor test
+
+POST a synthetic alert to the configured webhook to verify connectivity and
+formatting. Exits 2 if no webhook is configured or the POST fails. `--config`.
+
+## Usage
+
+    orin monitor test
+"""
+
+_MONITOR_CONFIG = """\
+# orin monitor config
+
+Show the resolved configuration (thresholds, webhook, interval) and whether it
+is valid. `--init` writes a scaffold config file you can edit. `--json`,
+`--config PATH`. The webhook may also come from `JETSON_ORIN_WEBHOOK_URL`.
+`notify_on_start` (default `true`) toggles the startup liveness alert.
+
+## Usage
+
+    orin monitor config
+    orin monitor config --init
+"""
+
+_MONITOR_SYSTEMD = """\
+# orin monitor (systemd management)
+
+Manage the monitor as a systemd `--user` service:
+
+- `monitor install` — write `~/.config/systemd/user/jetson-orin-monitor.service`.
+- `monitor enable` — `systemctl --user enable --now` (+ `loginctl enable-linger`
+  so it survives logout/reboot; `--no-linger` to skip).
+- `monitor disable` — stop and disable the service.
+- `monitor status` — unit installed/active/enabled state + currently firing keys.
+- `monitor uninstall` — disable and remove the unit file.
+
+All `systemctl`/`loginctl` calls degrade gracefully when systemd is absent.
+
+## Usage
+
+    orin monitor install
+    orin monitor enable
+    orin monitor status
+"""
+
+
+_SWAP = """\
+# orin swap
+
+Swap inspection, per-process history, and the guarded swap grow. Read verbs are
+descriptive (exit 0 even when a subsystem is absent); `grow` is the only mutator
+and is **dry-run unless `--apply` is passed**.
+
+## Verbs
+
+- `orin swap overview` — describe the swap surface **and** show the
+  live snapshot (the superset of `status`).
+- `orin swap status` — the quick snapshot only: swap/memory + a short sar trend
+  summary.
+- `orin swap grow SIZE [--apply] [--ephemeral]` — resize the swapfile
+  (`SIZE` is a placeholder, e.g. `64G`).
+- `orin swap history [--window DUR] [--top N]` — top per-process swap/RSS.
+- `orin swap sample` — take one snapshot for the history store.
+
+All verbs support `--json`. Sizes are binary (1024-based): `32G` == `32GiB` ==
+`32GB`; a bare number is bytes.
+"""
+
+_SWAP_STATUS = """\
+# orin swap status
+
+Read-only swap + memory snapshot, composed from `/proc` (devices, used%, unified
+memory, swappiness) plus a short trend summary read from the existing
+sysstat/`sar` history (recent and average swap-used %). Works without root and
+exits 0 even when a subsystem is unavailable (it reports `available: false`).
+
+`status` is the quick snapshot-only view. For the same snapshot *plus* the verb
+surface in one read, use `orin swap overview` (the superset).
+
+## Usage
+
+    orin swap status
+    orin swap status --json
+"""
+
+_SWAP_GROW = """\
+# orin swap grow SIZE
+
+The guarded mutator: resize the file-backed swapfile in place
+(`swapoff -> fallocate -> chmod -> mkswap -> swapon`, plus an fstab ensure on the
+persistent path). `SIZE` is a **placeholder** — replace it with a human-readable
+size (`64G`, `32GiB`, `16g`, or a raw byte count; binary 1024-based). Don't type
+the literal word `size`: `swap grow 64G`, not `swap grow size 64G`.
+
+**Dry-run by default**: without `--apply` it previews the exact step plan on
+stderr, emits the structured plan on stdout, and changes nothing (exit 0).
+`--apply` executes it and **requires root** — the executor raises an error
+(exit 2) with a `sudo … --apply` hint otherwise. `--ephemeral` skips the
+persistent fstab entry (this boot only). Hazard warnings (e.g. the swapoff
+ENOMEM risk) are always surfaced on stderr.
+
+## Usage
+
+    orin swap grow 32G                 # dry-run preview
+    orin swap grow 32G --json
+    sudo orin swap grow 32G --apply
+"""
+
+_SWAP_HISTORY = """\
+# orin swap history
+
+Top per-process swap/RSS consumers over a recent window, aggregated from the
+bounded history store the `sample` verb feeds. `--window` accepts a duration
+(`1h`, `30m`, `2d`, or a raw second count; default `1h`); `--top N` caps the
+ranking (default 10). An empty store prints "no history recorded yet" (and `[]`
+under `--json`) and exits 0.
+
+## Usage
+
+    orin swap history
+    orin swap history --window 6h --top 20
+    orin swap history --json
+"""
+
+_SWAP_SAMPLE = """\
+# orin swap sample
+
+Take one snapshot of per-process memory/swap from `/proc` and append it to the
+bounded history store (which `swap history` later queries). Reports how many
+process samples were written. This is the verb an operator's systemd timer /
+cron invokes periodically to build up history.
+
+## Usage
+
+    orin swap sample
+    orin swap sample --json
+"""
+
+_SWAP_OVERVIEW = """\
+# orin swap overview
+
+The comprehensive read of the swap noun: the descriptive surface (its verbs and
+one-liners) **plus** the live snapshot `orin swap status` shows on its
+own — unified memory, swap devices, swappiness, and the short sar trend. `status`
+remains the quick snapshot-only view (same input); `overview` is the superset.
+
+Accepts and ignores a stray `target` positional and always exits 0 (the
+descriptive-verb contract): the underlying collectors degrade to
+`available: false` rather than raise, so overview never hard-fails.
+
+## Usage
+
+    orin swap overview
+    orin swap overview --json
+"""
+
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
     ("orin",): _ROOT,
@@ -280,4 +523,22 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("containers",): _CONTAINERS,
     ("network",): _NETWORK,
     ("processes",): _PROCESSES,
+    ("monitor",): _MONITOR,
+    ("monitor", "overview"): _MONITOR,
+    ("monitor", "check"): _MONITOR_CHECK,
+    ("monitor", "once"): _MONITOR_ONCE,
+    ("monitor", "run"): _MONITOR_RUN,
+    ("monitor", "test"): _MONITOR_TEST,
+    ("monitor", "config"): _MONITOR_CONFIG,
+    ("monitor", "install"): _MONITOR_SYSTEMD,
+    ("monitor", "enable"): _MONITOR_SYSTEMD,
+    ("monitor", "disable"): _MONITOR_SYSTEMD,
+    ("monitor", "status"): _MONITOR_SYSTEMD,
+    ("monitor", "uninstall"): _MONITOR_SYSTEMD,
+    ("swap",): _SWAP,
+    ("swap", "overview"): _SWAP_OVERVIEW,
+    ("swap", "status"): _SWAP_STATUS,
+    ("swap", "grow"): _SWAP_GROW,
+    ("swap", "history"): _SWAP_HISTORY,
+    ("swap", "sample"): _SWAP_SAMPLE,
 }
