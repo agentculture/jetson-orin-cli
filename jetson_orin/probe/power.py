@@ -21,6 +21,7 @@ anything.
 
 from __future__ import annotations
 
+import subprocess
 from pathlib import Path
 from typing import Optional
 
@@ -89,6 +90,7 @@ def _chip_rails(hdir: Path) -> list[dict]:
 
 
 def _rails(hwmon_root: Path) -> list[dict]:
+    """Walk hwmon; any OSError (e.g. PermissionError) propagates to the caller."""
     if not hwmon_root.is_dir():
         return []
     rails: list[dict] = []
@@ -99,17 +101,30 @@ def _rails(hwmon_root: Path) -> list[dict]:
     return rails
 
 
+def _safe_run(run: Runner, name: str, args: list[str]) -> Optional[str]:
+    """Call the runner, treating any OSError/subprocess failure as 'no output'."""
+    try:
+        return run(name, args)
+    except (OSError, subprocess.SubprocessError):
+        return None
+
+
 def collect(runner: Optional[Runner] = None, hwmon_root: str = "/sys/class/hwmon") -> dict:
     """Return a power report (nvpmodel + jetson_clocks + hwmon rails)."""
     run = runner or default_runner
 
-    nvpmodel = _parse_nvpmodel(run("nvpmodel", ["-q"]))
+    nvpmodel = _parse_nvpmodel(_safe_run(run, "nvpmodel", ["-q"]))
     if not nvpmodel["available"]:
         nvpmodel["remediation"] = _NVPMODEL_HINT
-    clocks = _parse_jetson_clocks(run("jetson_clocks", ["--show"]))
+    clocks = _parse_jetson_clocks(_safe_run(run, "jetson_clocks", ["--show"]))
     if not clocks["available"]:
         clocks["remediation"] = _CLOCKS_HINT
-    rails = _rails(Path(hwmon_root))
+    warnings: list[str] = []
+    try:
+        rails = _rails(Path(hwmon_root))
+    except (OSError, ValueError) as exc:
+        rails = []
+        warnings.append(f"hwmon rails unreadable ({type(exc).__name__}: {exc})")
 
     if not nvpmodel["available"] and not clocks["available"] and not rails:
         return unavailable(
@@ -150,5 +165,6 @@ def collect(runner: Optional[Runner] = None, hwmon_root: str = "/sys/class/hwmon
         "power",
         source="nvpmodel, jetson_clocks, hwmon",
         sections=sections,
+        warnings=warnings,
         data={"nvpmodel": nvpmodel, "jetson_clocks": clocks, "rails": rails},
     )

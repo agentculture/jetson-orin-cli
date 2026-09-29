@@ -127,3 +127,41 @@ def test_power_not_in_status_subsystems(capsys) -> None:
         "processes",
         "thermal",
     ]
+
+
+def test_power_inaccessible_hwmon_root_degrades(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    root = _hwmon(tmp_path)
+
+    def boom(self, *a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "is_dir", boom)
+    rep = power.collect(runner=_runner(_NVPMODEL_OUT, _JC_OK), hwmon_root=root)
+    assert rep["available"] is True
+    assert rep["data"]["rails"] == []
+    assert any("hwmon" in w for w in rep["warnings"])
+
+
+def test_power_glob_permission_error_degrades(tmp_path, monkeypatch) -> None:
+    from pathlib import Path
+
+    root = _hwmon(tmp_path)
+
+    def boom(self, *a, **k):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(Path, "glob", boom)
+    rep = power.collect(runner=lambda _n, _a: None, hwmon_root=root)
+    assert rep["available"] is False and rep["remediation"]
+
+
+def test_power_runner_that_raises_degrades(tmp_path) -> None:
+    def run(_n, _a):
+        raise OSError("exec failed")
+
+    rep = power.collect(runner=run, hwmon_root=_hwmon(tmp_path))
+    assert rep["available"] is True
+    assert rep["data"]["nvpmodel"]["available"] is False
+    assert rep["data"]["rails"]
