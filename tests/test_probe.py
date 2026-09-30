@@ -1,0 +1,468 @@
+"""Unit tests for the host-telemetry collectors in :mod:`jetson_orin.probe`.
+
+Every collector takes an injectable file root and/or command runner, so these
+tests run deterministically on any Linux host (no GPU, docker, or aarch64
+required) by feeding fixtures and fake runners.
+"""
+
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+
+from jetson_orin.probe import (
+    _run,
+    containers,
+    contention,
+    disk,
+    gpu,
+    memory,
+    network,
+    processes,
+    status,
+    thermal,
+)
+
+# --- _run helpers ---------------------------------------------------------
+
+
+def test_run_tool_absent_returns_none() -> None:
+    assert _run.run_tool("definitely-not-a-real-tool-xyz", []) is None
+
+
+def test_read_text_missing_returns_none() -> None:
+    assert _run.read_text("/no/such/path/xyz") is None
+
+
+# --- memory ---------------------------------------------------------------
+
+_MEMINFO = """\
+MemTotal:       1000 kB
+MemFree:         100 kB
+MemAvailable:     50 kB
+Buffers:          10 kB
+Cached:           20 kB
+Shmem:             5 kB
+SwapTotal:       200 kB
+SwapFree:         40 kB
+"""
+
+
+def test_memory_parses_and_warns(tmp_path) -> None:
+    path = tmp_path / "meminfo"
+    path.write_text(_MEMINFO)
+    rep = memory.collect(str(path))
+    data = rep["data"]
+    assert rep["available"] is True
+    assert data["total_bytes"] == 1000 * 1024
+    assert data["available_bytes"] == 50 * 1024
+    assert data["used_bytes"] == 950 * 1024
+    assert round(data["used_pct"]) == 95
+    # 5% available (< 10%) and 80% swap used (> 25%) -> two warnings.
+    assert len(rep["warnings"]) == 2
+
+
+def test_memory_unavailable_when_missing() -> None:
+    rep = memory.collect("/no/such/meminfo")
+    assert rep["available"] is False
+    assert rep["remediation"]
+
+
+# --- contention -----------------------------------------------------------
+
+_STAT_1 = """\
+cpu  100 0 50 1000 200 0 0 0 0 0
+cpu0 50 0 25 500 100 0 0 0 0 0
+procs_running 2
+procs_blocked 10
+"""
+_STAT_2 = """\
+cpu  110 0 60 1100 500 0 0 0 0 0
+cpu0 55 0 30 550 250 0 0 0 0 0
+procs_running 1
+procs_blocked 22
+"""
+
+
+def _two_shot(*samples):
+    """A sampler that returns each ``samples`` value in turn, then the last."""
+    queue = list(samples)
+
+    def sampler():
+        return queue.pop(0) if len(queue) > 1 else queue[0]
+
+    return sampler
+
+
+def test_contention_computes_iowait_and_blocked() -> None:
+    rep = contention.collect(_two_shot(_STAT_1, _STAT_2), sleep=lambda _s: None)
+    data = rep["data"]
+    assert rep["available"] is True
+    # d_iowait = 300, d_total = (1770-1350) = 420 -> 71%; blocked from 2nd sample.
+    assert round(data["iowait_pct"]) == 71
+    assert data["blocked_procs"] == 22
+    assert len(rep["warnings"]) == 2  # high iowait + many blocked
+
+
+def test_contention_unavailable_when_stat_missing() -> None:
+    rep = contention.collect(lambda: None, sleep=lambda _s: None)
+    assert rep["available"] is False
+
+
+def test_contention_second_read_fail_iowait_is_none_not_zero() -> None:
+    # Second read fails: iowait can't be measured -> None ("n/a"), NOT a
+    # misleading 0%. The instantaneous blocked count still comes through.
+    rep = contention.collect(_two_shot(_STAT_1, None), sleep=lambda _s: None)
+    data = rep["data"]
+    assert rep["available"] is True
+    assert data["iowait_pct"] is None
+    assert data["blocked_procs"] == 10
+
+
+# --- disk -----------------------------------------------------------------
+
+
+def _fake_statvfs(_path: str):
+    # 100 blocks * 1024 = 102400 total; 10 free -> 90% used; 8 avail.
+    return SimpleNamespace(f_blocks=100, f_frsize=1024, f_bfree=10, f_bavail=8)
+
+
+def test_disk_filters_virtual_and_warns_when_full(tmp_path) -> None:
+    mounts = tmp_path / "mounts"
+    mounts.write_text(
+        "/dev/nvme0n1p2 / ext4 rw 0 0\n"
+        "/dev/loop0 /snap/x squashfs ro 0 0\n"
+        "tmpfs /run tmpfs rw 0 0\n"
+        "proc /proc proc rw 0 0\n"
+    )
+    rep = disk.collect(str(mounts), statvfs=_fake_statvfs)
+    filesystems = rep["data"]["filesystems"]
+    assert len(filesystems) == 1  # loop/tmpfs/proc all filtered out
+    assert filesystems[0]["mount"] == "/"
+    assert filesystems[0]["used_pct"] == 90.0
+    assert rep["warnings"]  # 90% >= 85% full
+
+
+def test_disk_decodes_mountpoints_without_mangling_utf8(tmp_path) -> None:
+    mounts = tmp_path / "mounts"
+    mounts.write_bytes(
+        "/dev/sda1 /media/u/Données ext4 rw 0 0\n".encode("utf-8")  # raw UTF-8
+        + b"/dev/sdb1 /media/u/My\\040Disk ext4 rw 0 0\n"  # kernel-escaped space
+        + b"/dev/sdc1 /media/u/Donn\\303\\251es2 ext4 rw 0 0\n"  # escaped UTF-8 bytes
+        + b"/dev/sdd1 /media/u/back\\134slash ext4 rw 0 0\n"  # escaped backslash
+    )
+    seen: list[str] = []
+
+    def _recording_statvfs(path: str):
+        seen.append(path)
+        return _fake_statvfs(path)
+
+    rep = disk.collect(str(mounts), statvfs=_recording_statvfs)
+    expected = [
+        "/media/u/Données",
+        "/media/u/My Disk",
+        "/media/u/Données2",
+        "/media/u/back\\slash",
+    ]
+    assert seen == expected
+    assert [fs["mount"] for fs in rep["data"]["filesystems"]] == expected
+
+
+def test_disk_unavailable_when_missing() -> None:
+    rep = disk.collect("/no/such/mounts")
+    assert rep["available"] is False
+
+
+# --- thermal --------------------------------------------------------------
+
+
+def test_thermal_reads_zones_and_hwmon_dedups_acpitz(tmp_path) -> None:
+    tz = tmp_path / "thermal"
+    (tz / "thermal_zone0").mkdir(parents=True)
+    (tz / "thermal_zone0" / "type").write_text("acpitz\n")
+    (tz / "thermal_zone0" / "temp").write_text("56000\n")
+
+    hw = tmp_path / "hwmon"
+    (hw / "hwmon0").mkdir(parents=True)
+    (hw / "hwmon0" / "name").write_text("acpitz\n")  # duplicate of zones
+    (hw / "hwmon0" / "temp1_input").write_text("56000\n")
+    (hw / "hwmon1").mkdir()
+    (hw / "hwmon1" / "name").write_text("nvme\n")
+    (hw / "hwmon1" / "temp1_input").write_text("48900\n")
+    (hw / "hwmon1" / "temp1_label").write_text("Composite\n")
+
+    rep = thermal.collect(str(tz), str(hw))
+    assert rep["available"] is True
+    assert rep["data"]["hottest_c"] == 56.0
+    names = [s["name"] for s in rep["data"]["sensors"]]
+    assert "acpitz" in names
+    assert "nvme/Composite" in names
+    # acpitz hwmon must be skipped (it mirrors the zone) -> appears once only.
+    assert names.count("acpitz") == 1
+
+
+def test_thermal_warns_when_hot(tmp_path) -> None:
+    tz = tmp_path / "thermal"
+    (tz / "thermal_zone0").mkdir(parents=True)
+    (tz / "thermal_zone0" / "type").write_text("soc\n")
+    (tz / "thermal_zone0" / "temp").write_text("90000\n")  # 90 C
+    rep = thermal.collect(str(tz), str(tmp_path / "no-hwmon"))
+    assert rep["warnings"]
+
+
+def test_thermal_unavailable_when_empty(tmp_path) -> None:
+    rep = thermal.collect(str(tmp_path / "none"), str(tmp_path / "none2"))
+    assert rep["available"] is False
+
+
+# --- processes ------------------------------------------------------------
+
+
+def test_processes_ranks_by_rss(tmp_path) -> None:
+    (tmp_path / "meminfo").write_text("MemTotal: 1000 kB\n")
+    big = tmp_path / "1234"
+    big.mkdir()
+    (big / "status").write_text("Name:\tbig\nState:\tS (sleeping)\nVmRSS:\t 500 kB\n")
+    (big / "cmdline").write_text("big\x00--flag\x00")
+    small = tmp_path / "5678"
+    small.mkdir()
+    (small / "status").write_text("Name:\tsmall\nState:\tR\nVmRSS:\t 100 kB\n")
+    (small / "cmdline").write_text("small\x00")
+    # A kernel thread (no VmRSS) must be skipped.
+    kthread = tmp_path / "2"
+    kthread.mkdir()
+    (kthread / "status").write_text("Name:\tkworker\nState:\tS\n")
+
+    rep = processes.collect(str(tmp_path))
+    top = rep["data"]["top"]
+    assert rep["data"]["count"] == 2  # kworker skipped
+    assert top[0]["pid"] == 1234
+    assert top[0]["rss_bytes"] == 500 * 1024
+    assert top[1]["pid"] == 5678
+
+
+def test_processes_unavailable_when_missing() -> None:
+    rep = processes.collect("/no/such/proc")
+    assert rep["available"] is False
+
+
+# --- gpu ------------------------------------------------------------------
+
+
+def _gpu_runner(name: str, args) -> str:
+    assert name == "nvidia-smi"
+    joined = " ".join(args)
+    if "--query-gpu" in joined:
+        # name,util.gpu,util.mem,temp,power.draw,power.limit,mem.total,mem.used,sm,fan
+        return "NVIDIA Orin, 0, 0, 50, 11.75, [N/A], [N/A], [N/A], 2398, [N/A]\n"
+    if "--query-compute-apps" in joined:
+        return "576315, VLLM::EngineCore, 72841\n4390, python3, 4969\n"
+    return ""
+
+
+def test_gpu_sums_attributed_memory_when_unified() -> None:
+    rep = gpu.collect(runner=_gpu_runner)
+    assert rep["available"] is True
+    assert rep["data"]["gpu_attributed_mib"] == 72841 + 4969
+    text = " ".join(rep["sections"][0]["items"])
+    assert "unified" in text
+    assert "attributed" in text
+    assert len(rep["data"]["compute_apps"]) == 2
+
+
+def test_gpu_parses_quoted_process_names_with_commas() -> None:
+    # nvidia-smi CSV-quotes fields containing commas; naive split(",") would
+    # shift the used_memory column and corrupt the attributed-memory sum.
+    def runner(name: str, args) -> str:
+        joined = " ".join(args)
+        if "--query-gpu" in joined:
+            return "NVIDIA Orin, 0, 0, 50, 11.75, [N/A], [N/A], [N/A], 2398, [N/A]\n"
+        if "--query-compute-apps" in joined:
+            return '1234, "my app, with comma", 512\n'
+        return ""
+
+    rep = gpu.collect(runner=runner)
+    apps = rep["data"]["compute_apps"]
+    assert apps[0]["name"] == "my app, with comma"
+    assert rep["data"]["gpu_attributed_mib"] == 512
+
+
+def test_gpu_unavailable_without_nvidia_smi(tmp_path) -> None:
+    # Inject empty sysfs roots too, so this is the fully-degraded path even
+    # when run on real Jetson Orin hardware (see tests/test_probe_jetson.py
+    # for the sysfs-fallback paths this collector also supports).
+    rep = gpu.collect(
+        runner=lambda _n, _a: None,
+        devfreq_root=str(tmp_path / "no-devfreq"),
+        thermal_root=str(tmp_path / "no-thermal"),
+        hwmon_root=str(tmp_path / "no-hwmon"),
+    )
+    assert rep["available"] is False
+    assert rep["remediation"]
+
+
+def _no_sysfs(tmp_path) -> dict:
+    # Empty sysfs roots, so the collector cannot fall back to the real board.
+    return {
+        "devfreq_root": str(tmp_path / "no-devfreq"),
+        "thermal_root": str(tmp_path / "no-thermal"),
+        "hwmon_root": str(tmp_path / "no-hwmon"),
+    }
+
+
+def test_gpu_unavailable_reason_not_installed(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    monkeypatch.setattr(gpu.shutil, "which", lambda _n: None)
+    rep = gpu.collect(runner=lambda _n, _a: None, **_no_sysfs(tmp_path))
+    assert rep["reason"] == "not_installed"
+
+
+def test_gpu_unavailable_reason_failed_when_tool_present(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    monkeypatch.setattr(gpu.shutil, "which", lambda n: f"/usr/bin/{n}")
+    rep = gpu.collect(runner=lambda _n, _a: None, **_no_sysfs(tmp_path))
+    assert rep["reason"] == "failed"
+
+
+def test_gpu_unavailable_reason_failed_when_sysfs_node_unreadable(
+    monkeypatch: pytest.MonkeyPatch, tmp_path
+) -> None:
+    # No nvidia-smi, but the GPU devfreq node exists with nothing readable in
+    # it: the GPU is present and its probe failed, not "not installed".
+    monkeypatch.setattr(gpu.shutil, "which", lambda _n: None)
+    roots = _no_sysfs(tmp_path)
+    (tmp_path / "no-devfreq" / "17000000.gpu").mkdir(parents=True)
+    rep = gpu.collect(runner=lambda _n, _a: None, **roots)
+    assert rep["available"] is False
+    assert rep["reason"] == "failed"
+
+
+# --- network --------------------------------------------------------------
+
+_ADDR = """\
+lo               UNKNOWN        127.0.0.1/8 ::1/128
+wlP9s9           UP             192.168.1.157/24 fe80::1/64
+tailscale0       UNKNOWN        100.127.105.72/32
+br-abc123        UP             172.20.0.1/16
+veth9999@if2     UP             fe80::2/64
+docker0          DOWN           172.17.0.1/16
+"""
+_ROUTE = "default via 192.168.1.1 dev wlP9s9 proto dhcp src 192.168.1.157 metric 600\n"
+
+
+def _net_runner(name: str, args):
+    assert name == "ip"
+    if list(args[:2]) == ["-br", "addr"]:
+        return _ADDR
+    if list(args[:1]) == ["route"]:
+        return _ROUTE
+    return None
+
+
+def test_network_summarizes_and_excludes_bridge_addrs() -> None:
+    rep = network.collect(runner=_net_runner)
+    data = rep["data"]
+    assert rep["available"] is True
+    assert data["veth_count"] == 1
+    assert data["bridge_count"] == 2  # br-abc123 + docker0
+    # Reachable = LAN + tailscale, NOT the 172.x docker bridge gateways.
+    assert set(data["reachable_ipv4"]) == {"192.168.1.157", "100.127.105.72"}
+    assert data["default_routes"][0]["dev"] == "wlP9s9"
+
+
+def test_network_usb_gadget_links_are_not_reachable() -> None:
+    # Jetson's USB device-mode bridge (l4tbr0 at 192.168.55.1) and its usb*/rndis*
+    # members only reach a host plugged into the USB port, not the network.
+    addr = (
+        "lo               UNKNOWN        127.0.0.1/8 ::1/128\n"
+        "eth0             UP             10.0.0.5/24\n"
+        "l4tbr0           UP             192.168.55.1/24\n"
+        "usb0             UP             192.168.55.2/24\n"
+        "rndis0           UP             192.168.56.1/24\n"
+    )
+
+    def _runner(name: str, args) -> str | None:
+        if args and args[0] == "-br":
+            return addr
+        return "default via 10.0.0.1 dev eth0 proto dhcp src 10.0.0.5\n"
+
+    rep = network.collect(runner=_runner)
+    data = rep["data"]
+    assert data["reachable_ipv4"] == ["10.0.0.5"]
+    kinds = {i["name"]: i["kind"] for i in data["interfaces"]}
+    assert kinds["l4tbr0"] == kinds["usb0"] == kinds["rndis0"] == "usb-gadget"
+    assert data["bridge_count"] == 0  # l4tbr0 is not a docker bridge
+
+
+def test_network_unavailable_without_ip() -> None:
+    rep = network.collect(runner=lambda _n, _a: None)
+    assert rep["available"] is False
+
+
+# --- containers -----------------------------------------------------------
+
+_DOCKER = (
+    '{"Names":"vllm","Status":"Up 2 days (healthy)",'
+    '"Image":"nvcr.io/nvidia/vllm:26.04","State":"running"}\n'
+    '{"Names":"tei","Status":"Up 7 days (unhealthy)",'
+    '"Image":"qq-tei","State":"running"}\n'
+)
+
+
+def test_containers_flags_unhealthy_and_gpu() -> None:
+    rep = containers.collect(runner=lambda _n, _a: _DOCKER)
+    data = rep["data"]
+    assert len(data["containers"]) == 2
+    assert any("unhealthy" in w for w in rep["warnings"])
+    gpu_flags = {c["name"]: c["gpu"] for c in data["containers"]}
+    assert gpu_flags["vllm"] is True  # nvcr.io image
+    assert gpu_flags["tei"] is False
+
+
+def test_containers_unavailable_without_docker() -> None:
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["available"] is False
+
+
+def test_containers_unavailable_reason_not_installed(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(containers.shutil, "which", lambda _n: None)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["available"] is False
+    assert rep["reason"] == "not_installed"
+
+
+def test_containers_unavailable_reason_not_permitted(monkeypatch: pytest.MonkeyPatch) -> None:
+    # docker is installed and its socket exists, but this user may not use it
+    # (not in the docker group).
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr(containers.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(containers.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(containers.os, "access", lambda _p, _m: False)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["reason"] == "not_permitted"
+
+
+def test_containers_unavailable_reason_failed(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Installed and permitted, yet `docker ps` fails: a genuine probe failure.
+    monkeypatch.delenv("DOCKER_HOST", raising=False)
+    monkeypatch.setattr(containers.shutil, "which", lambda n: f"/usr/bin/{n}")
+    monkeypatch.setattr(containers.os.path, "exists", lambda _p: True)
+    monkeypatch.setattr(containers.os, "access", lambda _p, _m: True)
+    rep = containers.collect(runner=lambda _n, _a: None)
+    assert rep["reason"] == "failed"
+
+
+# --- status (aggregator) --------------------------------------------------
+
+
+def test_status_has_host_and_subsystems() -> None:
+    # Fake runner makes the tool-backed subsystems unavailable; the /proc-backed
+    # ones (memory/disk/thermal/processes) still read the real Linux host.
+    rep = status.collect(runner=lambda _n, _a: None)
+    assert rep["subject"] == "status"
+    titles = [s["title"] for s in rep["sections"]]
+    assert "Host" in titles
+    assert "Subsystems" in titles
+    assert isinstance(rep["warnings"], list)
+    assert "host" in rep["data"]

@@ -66,13 +66,16 @@ def _build_parser() -> argparse.ArgumentParser:
     from jetson_orin.cli._commands import doctor as _doctor_cmd
     from jetson_orin.cli._commands import explain as _explain_cmd
     from jetson_orin.cli._commands import learn as _learn_cmd
+    from jetson_orin.cli._commands import machine as _machine_cmd
+    from jetson_orin.cli._commands import monitor as _monitor_group
     from jetson_orin.cli._commands import overview as _overview_cmd
+    from jetson_orin.cli._commands import swap as _swap_group
     from jetson_orin.cli._commands import whoami as _whoami_cmd
 
     parser = _CliArgumentParser(
         prog="orin",
         description="orin — the jetson-orin-cli agent's command surface "
-        "(a clonable template for AgentCulture mesh agents).",
+        "(a Jetson Orin device CLI: host telemetry, swap, monitor and power for the AGX Orin).",
     )
     parser.add_argument(
         "--version",
@@ -89,6 +92,9 @@ def _build_parser() -> argparse.ArgumentParser:
     _overview_cmd.register(sub)
     _doctor_cmd.register(sub)
     _cli_group.register(sub)
+    _machine_cmd.register(sub)
+    _monitor_group.register(sub)
+    _swap_group.register(sub)
     # Register your own noun groups here:
     #   from jetson_orin.cli._commands import my_noun as _my_noun_group
     #   _my_noun_group.register(sub)
