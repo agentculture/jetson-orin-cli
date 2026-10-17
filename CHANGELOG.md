@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.0] - 2026-10-17
+
+### Added
+
+- `orin window show|store|lock|restore`, `orin drop-caches` and `orin grant-permissions` per the machine-CLI window contract (lobes-cli docs/contracts/machine-cli-window.md): locked-clocks benchmark window via jetson_clocks --store/--restore/--fan under $XDG_STATE_HOME/orin, page-cache clear and sudo grant detection/install (sudo -n -l, visudo -cf, /etc/sudoers.d/orin-lobes). Tested with fakes only; no live Orin run yet.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

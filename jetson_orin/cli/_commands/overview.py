@@ -41,6 +41,9 @@ _VERBS = [
     "power — nvpmodel mode, jetson_clocks state, per-rail power",
     "swap — swap status, per-process history, guarded grow",
     "monitor — AI-free threshold watchdog that webhooks on alerts",
+    "window — benchmark window: show/store/lock/restore clocks + fan",
+    "drop-caches — sync + clear the page cache (sudo grant)",
+    "grant-permissions — report/install passwordless sudo rules",
 ]
 
 

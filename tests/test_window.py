@@ -1,0 +1,255 @@
+"""Tests for ``orin window|drop-caches|grant-permissions`` (fakes only, no real sudo)."""
+
+from __future__ import annotations
+
+import json
+
+import pytest
+
+from jetson_orin.cli import main
+from jetson_orin.cli._commands import window as wcmd
+
+SYSCTL_LIST = (
+    "User spark may run the following commands:\n"
+    "    (root) NOPASSWD: /usr/sbin/sysctl -w vm.drop_caches\\=3\n"
+)
+TEE_LIST = "    (root) NOPASSWD: /usr/bin/tee /proc/sys/vm/drop_caches\n"
+ALL_LIST = "    (ALL : ALL) NOPASSWD: ALL\n"
+NO_LIST = "User spark may run the following commands:\n    (ALL) /usr/bin/ls\n"
+WINDOW_LIST = (
+    "    (root) NOPASSWD: /usr/bin/jetson_clocks, /usr/bin/jetson_clocks --fan\n" + SYSCTL_LIST
+)
+
+
+class Fake:
+    """Records argv; answers by prefix. Missing tools listed in ``missing``."""
+
+    def __init__(self, sudo_list=NO_LIST, missing=(), fail=None):
+        self.calls: list[tuple[tuple, str | None]] = []
+        self.sudo_list = sudo_list
+        self.missing = set(missing)
+        self.fail = fail or {}
+
+    def __call__(self, argv, stdin=None):
+        argv = tuple(argv)
+        self.calls.append((argv, stdin))
+        if argv[0] in self.missing:
+            return None
+        for prefix, res in self.fail.items():
+            if argv[: len(prefix)] == prefix:
+                return res
+        if argv == ("sudo", "-n", "-l"):
+            return (0, self.sudo_list, "")
+        if argv[0] == "nvpmodel":
+            return (0, "NV Power Mode: MAXN\n0\n", "")
+        return (0, "", "")
+
+    def argvs(self):
+        return [c[0] for c in self.calls]
+
+
+@pytest.fixture
+def env(tmp_path, monkeypatch):
+    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    fake = Fake()
+    monkeypatch.setattr(wcmd, "_exec", fake)
+    return fake
+
+
+def run(capsys, *argv):
+    rc = main(list(argv) + ["--json"])
+    out = capsys.readouterr()
+    return rc, json.loads(out.out), out.err
+
+
+def use(monkeypatch, fake):
+    monkeypatch.setattr(wcmd, "_exec", fake)
+
+
+# --- window --------------------------------------------------------------
+
+
+def test_show_idle(env, capsys):
+    rc, o, _ = run(capsys, "window", "show")
+    assert rc == 0 and o["ok"] is True and o["reason"] is None
+    assert o["active"] is False and o["stored"] is False and o["supported"] is True
+    assert o["power_mode"] == "MAXN"
+    assert set(o["clocks"]) == {"gpu_mhz", "gpu_min_mhz", "gpu_max_mhz", "emc_mhz"}
+    assert o["fan_profile"] is None  # unreadable -> null, never guessed
+    assert not any(a[:2] == ("sudo", "-n") for a in env.argvs())  # show needs no root
+
+
+def test_store_lock_restore_cycle(env, capsys, tmp_path):
+    rc, o, _ = run(capsys, "window", "store")
+    assert rc == 0 and o["action"] == "store" and o["stored"] is True and o["active"] is False
+    clocks = str(tmp_path / "state/orin/window-clocks.conf")
+    assert ("sudo", "-n", "/usr/bin/jetson_clocks", "--store", clocks) in env.argvs()
+
+    rc, o, _ = run(capsys, "window", "lock")
+    assert rc == 0 and o["active"] is True and o["action"] == "lock"
+    assert ("sudo", "-n", "/usr/bin/jetson_clocks") in env.argvs()
+    assert ("sudo", "-n", "/usr/bin/jetson_clocks", "--fan") in env.argvs()
+
+    rc, o, _ = run(capsys, "window", "restore")
+    assert rc == 0 and o["restored"] is True and o["stored"] is False and o["active"] is False
+    assert ("sudo", "-n", "/usr/bin/jetson_clocks", "--restore", clocks) in env.argvs()
+
+
+def test_lock_without_store_refused(env, capsys):
+    rc, o, err = run(capsys, "window", "lock")
+    assert rc == 1 and o["ok"] is False and o["reason"] == "no_stored_state"
+    assert "error:" in err
+    assert not any(a[:2] == ("sudo", "-n") for a in env.argvs())
+
+
+def test_store_while_active_refused(env, capsys):
+    run(capsys, "window", "store")
+    run(capsys, "window", "lock")
+    n = len(env.calls)
+    rc, o, _ = run(capsys, "window", "store")
+    assert rc == 1 and o["reason"] == "window_active"
+    assert not any(a[:2] == ("sudo", "-n") for a, _ in env.calls[n:])
+
+
+def test_restore_without_state_is_ok(env, capsys):
+    rc, o, _ = run(capsys, "window", "restore")
+    assert rc == 0 and o["ok"] is True and o["restored"] is False
+
+
+def test_store_not_granted(env, monkeypatch, capsys):
+    f = Fake(
+        fail={("sudo", "-n", "/usr/bin/jetson_clocks"): (1, "", "sudo: a password is required")}
+    )
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "window", "store")
+    assert rc == 2 and o["reason"] == "not_granted" and o["stored"] is False
+
+
+def test_tool_missing(env, monkeypatch, capsys):
+    use(monkeypatch, Fake(missing={"jetson_clocks"}))
+    rc, o, _ = run(capsys, "window", "store")
+    assert rc == 2 and o["reason"] == "tool_missing"
+
+
+def test_privileged_failure(env, monkeypatch, capsys):
+    f = Fake(fail={("sudo", "-n", "/usr/bin/jetson_clocks"): (1, "", "boom")})
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "window", "store")
+    assert rc == 2 and o["reason"] == "failed" and o["message"] == "boom"
+
+
+# --- drop-caches ---------------------------------------------------------
+
+
+def test_drop_caches_sysctl(env, monkeypatch, capsys):
+    f = Fake(sudo_list=SYSCTL_LIST)
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "drop-caches")
+    assert (rc, o) == (0, {"ok": True, "reason": None, "cleared": True, "rule": "sysctl"})
+    assert ("sudo", "-n", "/usr/sbin/sysctl", "-w", "vm.drop_caches=3") in f.argvs()
+    assert f.argvs().index(("sync",)) < f.argvs().index(
+        ("sudo", "-n", "/usr/sbin/sysctl", "-w", "vm.drop_caches=3")
+    )
+
+
+def test_drop_caches_tee_uses_stdin(env, monkeypatch, capsys):
+    f = Fake(sudo_list=TEE_LIST)
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "drop-caches")
+    assert rc == 0 and o["rule"] == "tee"
+    assert (("sudo", "-n", "tee", "/proc/sys/vm/drop_caches"), "3") in f.calls
+
+
+def test_drop_caches_all(env, monkeypatch, capsys):
+    use(monkeypatch, Fake(sudo_list=ALL_LIST))
+    rc, o, _ = run(capsys, "drop-caches")
+    assert rc == 0 and o["rule"] == "all"
+
+
+def test_drop_caches_no_grant(env, capsys):
+    rc, o, _ = run(capsys, "drop-caches")  # Orin's real listing (2026-10-17): no rule
+    assert rc == 2 and o["reason"] == "not_granted" and o["cleared"] is False
+    assert ("sync",) not in env.argvs()
+
+
+def test_drop_caches_failure(env, monkeypatch, capsys):
+    f = Fake(
+        sudo_list=SYSCTL_LIST,
+        fail={("sudo", "-n", "/usr/sbin/sysctl"): (1, "", "read-only")},
+    )
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "drop-caches")
+    assert rc == 2 and o["reason"] == "failed"
+
+
+# --- grant-permissions ---------------------------------------------------
+
+
+def test_grant_check_none(env, capsys):
+    rc, o, _ = run(capsys, "grant-permissions", "--check")
+    assert rc == 0 and o["ok"] is True
+    assert o["drop_caches"] == {"granted": False, "rule": None, "source": "sudo -n -l"}
+    assert o["window"] == {"granted": False, "rule": None}
+    assert all(a[0] != "visudo" for a in env.argvs())
+
+
+def test_grant_check_existing_sysctl(env, monkeypatch, capsys):
+    use(monkeypatch, Fake(sudo_list=SYSCTL_LIST))
+    rc, o, _ = run(capsys, "grant-permissions", "--check")
+    assert o["drop_caches"]["granted"] and o["drop_caches"]["rule"] == "sysctl"
+
+
+def test_grant_existing_installs_nothing(env, monkeypatch, capsys):
+    f = Fake(sudo_list=WINDOW_LIST)
+    use(monkeypatch, f)
+    rc, o, _ = run(capsys, "grant-permissions", "--yes")
+    assert rc == 0 and o["installed"] is False
+    assert all(a[0] != "visudo" and "install" not in a for a in f.argvs())
+
+
+def test_grant_install_planned(env, capsys, monkeypatch):
+    seen = {}
+
+    def fake(argv, stdin=None):
+        if argv[0] == "visudo":
+            seen["body"] = open(argv[2]).read()
+        return Fake.__call__(env, argv, stdin)
+
+    use(monkeypatch, fake)
+    rc, o, err = run(capsys, "grant-permissions", "--yes")
+    assert rc == 0 and o["installed"] is True and o["path"] == "/etc/sudoers.d/orin-lobes"
+    assert "vm.drop_caches\\=3" in seen["body"] and "ALL=(root) NOPASSWD: ALL" not in seen["body"]
+    assert "/usr/bin/jetson_clocks --fan" in seen["body"]
+    argvs = env.argvs()
+    inst = [a for a in argvs if a[:2] == ("sudo", "install")]
+    assert len(inst) == 1
+    assert inst[0][2:8] == ("-m", "0440", "-o", "root", "-g", "root")
+    assert inst[0][-1] == "/etc/sudoers.d/orin-lobes"
+    assert [a[0] for a in argvs].index("visudo") < argvs.index(inst[0])
+    assert "rules to install" in err  # printed before installing
+
+
+def test_grant_declined(env, monkeypatch, capsys):
+    monkeypatch.setattr(wcmd, "_confirm", lambda prompt: False)
+    rc, o, _ = run(capsys, "grant-permissions")
+    assert rc == 1 and o["reason"] == "declined" and o["installed"] is False
+    assert all(a[0] != "visudo" for a in env.argvs())
+
+
+def test_grant_consent_accepted(env, monkeypatch, capsys):
+    monkeypatch.setattr(wcmd, "_confirm", lambda prompt: True)
+    rc, o, _ = run(capsys, "grant-permissions")
+    assert rc == 0 and o["installed"] is True
+
+
+def test_grant_visudo_rejects(env, monkeypatch, capsys):
+    use(monkeypatch, Fake(fail={("visudo",): (1, "", "syntax error")}))
+    rc, o, _ = run(capsys, "grant-permissions", "--yes")
+    assert rc == 2 and o["reason"] == "failed" and o["installed"] is False
+
+
+def test_text_mode_and_explain(env, capsys):
+    assert main(["window", "show"]) == 0
+    assert "ok: True" in capsys.readouterr().out
+    for path in (["window"], ["drop-caches"], ["grant-permissions"]):
+        assert main(["explain", *path]) == 0
