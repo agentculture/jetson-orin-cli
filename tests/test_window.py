@@ -8,6 +8,7 @@ import pytest
 
 from jetson_orin.cli import main
 from jetson_orin.cli._commands import window as wcmd
+from jetson_orin.window import window as wmod
 
 SYSCTL_LIST = (
     "User spark may run the following commands:\n"
@@ -53,6 +54,7 @@ def env(tmp_path, monkeypatch):
     monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
     fake = Fake()
     monkeypatch.setattr(wcmd, "_exec", fake)
+    monkeypatch.setattr(wmod, "FAN_CONF", str(tmp_path / "no-such-nvfancontrol.conf"))
     return fake
 
 
@@ -253,3 +255,58 @@ def test_text_mode_and_explain(env, capsys):
     assert "ok: True" in capsys.readouterr().out
     for path in (["window"], ["drop-caches"], ["grant-permissions"]):
         assert main(["explain", *path]) == 0
+
+
+# --- clocks_locked / emc / fan profile (real Orin readings, 2026-10-17) ----------
+
+
+def _node(root, name, cur, mn, mx):
+    d = root / "class/devfreq" / name
+    d.mkdir(parents=True)
+    for f, v in (("cur_freq", cur), ("min_freq", mn), ("max_freq", mx)):
+        (d / f).write_text(f"{v}\n")
+
+
+def _orin_sysfs(tmp_path, gpu_min=1300500000):
+    _node(tmp_path, "17000000.gpu", 1300500000, gpu_min, 1300500000)
+    _node(tmp_path, "bwmgr", 3199000000, 3199000000, 3199000000)
+    _node(tmp_path, "15340000.vic", 729600000, 115200000, 729600000)
+    return str(tmp_path)
+
+
+def test_clocks_locked_true_on_operator_jetson_clocks(tmp_path):
+    rep = wmod.show(Fake(), sdir=str(tmp_path / "s"), sysroot=_orin_sysfs(tmp_path))
+    assert rep["active"] is False  # no lobes window...
+    assert rep["clocks_locked"] is True  # ...but the clocks are pinned
+    assert rep["clocks"]["gpu_mhz"] == 1300 and rep["clocks"]["emc_mhz"] == 3199
+
+
+def test_clocks_locked_false_when_gpu_range_open(tmp_path):
+    rep = wmod.show(
+        Fake(), sdir=str(tmp_path / "s"), sysroot=_orin_sysfs(tmp_path, gpu_min=306000000)
+    )
+    assert rep["clocks_locked"] is False and rep["clocks"]["gpu_min_mhz"] == 306
+
+
+def test_clocks_locked_false_when_emc_unpinned(tmp_path):
+    root = _orin_sysfs(tmp_path)
+    (tmp_path / "class/devfreq/bwmgr/min_freq").write_text("204000000\n")
+    assert wmod.show(Fake(), sdir=str(tmp_path / "s"), sysroot=root)["clocks_locked"] is False
+
+
+def test_clocks_locked_true_when_emc_unreadable(tmp_path):
+    _node(tmp_path, "17000000.gpu", 1300500000, 1300500000, 1300500000)
+    rep = wmod.show(Fake(), sdir=str(tmp_path / "s"), sysroot=str(tmp_path))
+    assert rep["clocks_locked"] is True and rep["clocks"]["emc_mhz"] is None
+
+
+def test_clocks_locked_null_when_missing(tmp_path):
+    rep = wmod.show(Fake(), sdir=str(tmp_path / "s"), sysroot=str(tmp_path))
+    assert rep["clocks_locked"] is None
+
+
+def test_fan_profile_from_conf(tmp_path):
+    conf = tmp_path / "nvfancontrol.conf"
+    conf.write_text("# c\nFAN_DEFAULT_PROFILE quiet\nFAN_DEFAULT_GOVERNOR pid\n")
+    rep = wmod.show(Fake(), sdir=str(tmp_path / "s"), sysroot=str(tmp_path), fan_conf=str(conf))
+    assert rep["fan_profile"] == "quiet"

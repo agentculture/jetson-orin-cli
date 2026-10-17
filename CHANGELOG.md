@@ -5,6 +5,16 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-10-17
+
+### Added
+
+- `orin window show` reports `clocks_locked` (true when the GPU devfreq node has min_freq == max_freq and, when readable, bwmgr/EMC does too; false when they differ; null when unreadable), so a lock held without a lobes window (operator `jetson_clocks`, crashed run) is visible while `active` keeps meaning "a window holds the lock".
+
+### Fixed
+
+- `emc_mhz` now reads `/sys/class/devfreq/bwmgr` (debugfs only as fallback); `fan_profile` is read from `/etc/nvfancontrol.conf` `FAN_DEFAULT_PROFILE` because `nvfancontrol -q` needs sudo.
+
 ## [0.7.0] - 2026-10-17
 
 ### Added

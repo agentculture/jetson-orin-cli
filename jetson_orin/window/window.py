@@ -8,7 +8,9 @@ is ``sudo -n`` so a missing grant fails fast as ``not_granted`` and never prompt
 Orin assumptions (verified only against fakes, no read on a live box):
 ``jetson_clocks`` (no args) pins clocks to max, ``jetson_clocks --fan`` pins the fan
 to max, and ``jetson_clocks --store/--restore`` round-trips clocks and fan PWM.
-``fan_profile`` is read-only from ``nvfancontrol -q`` when available, else null.
+``jetson_clocks --fan`` / ``--store`` / ``--restore`` are confirmed (L4T tool help).
+``fan_profile`` is read from /etc/nvfancontrol.conf ``FAN_DEFAULT_PROFILE`` (world-readable),
+else ``nvfancontrol -q``, else null. ``clocks_locked`` is read from devfreq min==max.
 """
 
 from __future__ import annotations
@@ -23,6 +25,7 @@ from jetson_orin.window import grant
 from jetson_orin.window._exec import Exec
 
 JC = grant.JETSON_CLOCKS
+FAN_CONF = "/etc/nvfancontrol.conf"
 
 
 def state_dir() -> str:
@@ -58,13 +61,39 @@ def _mhz(hz: Optional[int]) -> Optional[int]:
 
 def _clocks(sysroot: str) -> dict:
     gpu = next(iter(sorted(Path(sysroot, "class/devfreq").glob("*gpu*"))), None)
-    emc = Path(sysroot, "kernel/debug/clk/emc/clk_rate")
+    bw = Path(sysroot, "class/devfreq/bwmgr")
+    emc = _read_int(bw / "cur_freq")
+    if emc is None:
+        emc = _read_int(Path(sysroot, "kernel/debug/clk/emc/clk_rate"))
     return {
         "gpu_mhz": _mhz(_read_int(gpu / "cur_freq")) if gpu else None,
         "gpu_min_mhz": _mhz(_read_int(gpu / "min_freq")) if gpu else None,
         "gpu_max_mhz": _mhz(_read_int(gpu / "max_freq")) if gpu else None,
-        "emc_mhz": _mhz(_read_int(emc)),
+        "emc_mhz": _mhz(emc),
     }
+
+
+def _pinned(node: Optional[Path]) -> Optional[bool]:
+    """True when a devfreq node's min_freq == max_freq; None when unreadable."""
+    if node is None:
+        return None
+    lo, hi = _read_int(node / "min_freq"), _read_int(node / "max_freq")
+    return None if lo is None or hi is None else lo == hi
+
+
+def clocks_locked(sysroot: str) -> Optional[bool]:
+    """Is the GPU clock pinned, whoever pinned it (a window, jetson_clocks, a crashed run)?
+
+    GPU devfreq min==max decides; if the EMC node (``bwmgr``) is readable it must be pinned
+    too, else the lock is partial -> false. GPU unreadable -> null.
+    """
+    gpu = next(iter(sorted(Path(sysroot, "class/devfreq").glob("*gpu*"))), None)
+    g = _pinned(gpu)
+    if g is not True:
+        return g
+    bw = Path(sysroot, "class/devfreq/bwmgr")
+    e = _pinned(bw if bw.is_dir() else None)
+    return g if e is None else e
 
 
 def _temps(sysroot: str) -> dict:
@@ -78,7 +107,16 @@ def _temps(sysroot: str) -> dict:
     return out
 
 
-def _fan_profile(run: Exec) -> Optional[str]:
+def _fan_profile(run: Exec, conf: Optional[str] = None) -> Optional[str]:
+    conf = conf or FAN_CONF
+    # World-readable config first (nvfancontrol -q needs sudo for a normal user).
+    try:
+        for line in Path(conf).read_text().splitlines():
+            parts = line.split()
+            if len(parts) >= 2 and parts[0] == "FAN_DEFAULT_PROFILE":
+                return parts[1]
+    except OSError:
+        pass
     res = run(["nvfancontrol", "-q"], None)
     if res is None or res[0] != 0:
         return None
@@ -88,7 +126,13 @@ def _fan_profile(run: Exec) -> Optional[str]:
     return None
 
 
-def show(run: Exec, *, sdir: Optional[str] = None, sysroot: str = "/sys") -> dict:
+def show(
+    run: Exec,
+    *,
+    sdir: Optional[str] = None,
+    sysroot: str = "/sys",
+    fan_conf: Optional[str] = None,
+) -> dict:
     sdir = sdir or state_dir()
     state = _load(sdir)
     mode = power_probe._parse_nvpmodel(
@@ -98,11 +142,12 @@ def show(run: Exec, *, sdir: Optional[str] = None, sysroot: str = "/sys") -> dic
         "ok": True,
         "reason": None,
         "active": bool(state and state.get("locked")),
+        "clocks_locked": clocks_locked(sysroot),
         "stored": state is not None,
         "supported": True,
         "power_mode": mode["mode"],
         "clocks": _clocks(sysroot),
-        "fan_profile": _fan_profile(run),
+        "fan_profile": _fan_profile(run, fan_conf),
         "temps_c": _temps(sysroot),
         "detail": {"nvpmodel_id": mode["mode_id"], "state_file": str(_state_path(sdir))},
     }
