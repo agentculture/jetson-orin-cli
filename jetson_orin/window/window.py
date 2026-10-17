@@ -28,17 +28,38 @@ JC = grant.JETSON_CLOCKS
 FAN_CONF = "/etc/nvfancontrol.conf"
 
 
+_STATE_FILE = "window.json"
+_CLOCKS_FILE = "window-clocks.conf"
+
+
+def _default_state_dir() -> str:
+    return os.path.realpath(os.path.join(os.path.expanduser("~"), ".local", "state", "orin"))
+
+
 def state_dir() -> str:
-    base = os.environ.get("XDG_STATE_HOME") or os.path.join(os.path.expanduser("~"), ".local/state")
-    return os.path.join(base, "orin")
+    """Sanitised state dir. ``XDG_STATE_HOME`` is untrusted input: it is honoured
+    only when absolute with no ``..`` component, else (or if the resolved path
+    escapes ``$HOME``/the declared base) the default under ``$HOME`` is used."""
+    default = _default_state_dir()
+    raw = os.environ.get("XDG_STATE_HOME") or ""
+    if not raw or not os.path.isabs(raw) or ".." in raw.split(os.sep):
+        return default
+    base = os.path.realpath(raw)
+    cand = os.path.realpath(os.path.join(base, "orin"))
+    try:
+        if os.path.commonpath([base, cand]) != base:
+            return default
+    except ValueError:
+        return default
+    return cand
 
 
 def _state_path(sdir: str) -> Path:
-    return Path(sdir) / "window.json"
+    return Path(grant.contained(sdir, _STATE_FILE))
 
 
 def _clocks_path(sdir: str) -> str:
-    return os.path.join(sdir, "window-clocks.conf")
+    return grant.contained(sdir, _CLOCKS_FILE)
 
 
 def _load(sdir: str) -> Optional[dict]:

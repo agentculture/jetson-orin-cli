@@ -568,7 +568,7 @@ _DROP_CACHES = """\
 # orin drop-caches
 
 `sync`, then `vm.drop_caches=3` through the passwordless rule (`sysctl` or `tee`
-form, or `NOPASSWD: ALL` reported as `all`). No grant is exit 2 with
+form, or a full NOPASSWD ALL grant reported as `all`). No grant is exit 2 with
 `reason: not_granted`; it never prompts.
 
     orin drop-caches --json

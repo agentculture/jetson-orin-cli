@@ -2,7 +2,7 @@
 
 Cited from mjolnir's ``cachectl.py`` (cite-don't-import). Detection is
 ``sudo -n -l`` (read-only, never prompts). An existing equivalent rule is reused;
-``NOPASSWD: ALL`` counts as granted (``rule: "all"``) and is never installed.
+a full NOPASSWD ALL grant counts as granted (``rule: "all"``) and is never installed.
 Install writes a temp file, validates it with ``visudo -cf`` and places it with
 ONE ``sudo install -m 0440 -o root -g root`` into ``/etc/sudoers.d/orin-lobes``.
 """
@@ -70,9 +70,18 @@ def check(run: Exec) -> dict:
     }
 
 
+def contained(sdir: str, name: str) -> str:
+    """Join a constant file ``name`` onto ``sdir``, verifying containment."""
+    root = os.path.realpath(sdir)
+    path = os.path.realpath(os.path.join(root, name))
+    if os.path.commonpath([root, path]) != root:
+        raise ValueError(f"path escapes state dir: {name}")
+    return path
+
+
 def window_rules(state_dir: str) -> list[str]:
     """The exact sudoers command specs the window verbs need (printed before install)."""
-    clocks = os.path.join(state_dir, "window-clocks.conf")
+    clocks = contained(state_dir, "window-clocks.conf")
     return [
         JETSON_CLOCKS,
         f"{JETSON_CLOCKS} --fan",
