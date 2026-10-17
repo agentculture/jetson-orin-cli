@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 Format follows [Keep a Changelog](https://keepachangelog.com/). This project
 adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.7.1] - 2026-10-17
+
+### Added
+
+- `orin window show` reports `clocks_locked` (true when the GPU devfreq node has min_freq == max_freq and, when readable, bwmgr/EMC does too; false when they differ; null when unreadable), so a lock held without a lobes window (operator `jetson_clocks`, crashed run) is visible while `active` keeps meaning "a window holds the lock".
+
+### Fixed
+
+- `emc_mhz` now reads `/sys/class/devfreq/bwmgr` (debugfs only as fallback); `fan_profile` is read from `/etc/nvfancontrol.conf` `FAN_DEFAULT_PROFILE` because `nvfancontrol -q` needs sudo.
+
+## [0.7.0] - 2026-10-17
+
+### Added
+
+- `orin window show|store|lock|restore`, `orin drop-caches` and `orin grant-permissions` per the machine-CLI window contract (lobes-cli docs/contracts/machine-cli-window.md): locked-clocks benchmark window via jetson_clocks --store/--restore/--fan under $XDG_STATE_HOME/orin, page-cache clear and sudo grant detection/install (sudo -n -l, visudo -cf, /etc/sudoers.d/orin-lobes). Tested with fakes only; no live Orin run yet.
+
 ## [0.6.0] - 2026-09-29
 
 ### Added

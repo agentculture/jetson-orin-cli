@@ -41,6 +41,10 @@ skill kit under `.claude/skills/`, and a buildable/deployable package baseline.
 - `orin processes` — top processes by resident memory.
 - `orin power` — nvpmodel mode, jetson_clocks state, per-rail power draw.
 - `orin swap` — swap status, per-process history, guarded grow.
+- `orin window show|store|lock|restore` — benchmark window: lock clocks + fan to
+  max, then return to the stored state (needs the sudo grant).
+- `orin drop-caches` — `sync` + clear the page cache via the sudo grant.
+- `orin grant-permissions` — report (`--check`) or install the passwordless rules.
 - `orin monitor` — deterministic, AI-free threshold watchdog that webhooks on
   catastrophes.
 
@@ -542,6 +546,46 @@ descriptive-verb contract): the underlying collectors degrade to
     orin swap overview --json
 """
 
+_WINDOW = """\
+# orin window
+
+Benchmark window per the machine-CLI contract. `show` is read-only; `store`,
+`lock`, `restore` need the sudo grant (`orin grant-permissions`). `lock` requires
+a prior `store`; `store` refuses with `window_active` while locked; `restore`
+with no stored state is `ok` with `restored: false`. State lives in
+`~/.local/state/orin/`. Nothing persists across a reboot.
+
+## Usage
+
+    orin window show --json
+    orin window store|lock|restore --json
+
+Exit codes: 0 done, 1 refused by state, 2 environment (`not_granted`,
+`tool_missing`, `failed`). JSON carries `ok` and `reason`.
+"""
+
+_DROP_CACHES = """\
+# orin drop-caches
+
+`sync`, then `vm.drop_caches=3` through the passwordless rule (`sysctl` or `tee`
+form, or a full NOPASSWD ALL grant reported as `all`). No grant is exit 2 with
+`reason: not_granted`; it never prompts.
+
+    orin drop-caches --json
+"""
+
+_GRANT = """\
+# orin grant-permissions
+
+Detects rules with `sudo -n -l` and installs only what is missing as one
+`0440 root:root` drop-in, `/etc/sudoers.d/orin-lobes`, validated with
+`visudo -cf` first. Never grants full sudo. `--check` only reports; `--yes`
+skips the consent prompt (declined: exit 1, `reason: declined`).
+
+    orin grant-permissions --check --json
+    orin grant-permissions --yes
+"""
+
 ENTRIES: dict[tuple[str, ...], str] = {
     (): _ROOT,
     ("orin",): _ROOT,
@@ -553,6 +597,9 @@ ENTRIES: dict[tuple[str, ...], str] = {
     ("doctor",): _DOCTOR,
     ("cli",): _CLI,
     ("cli", "overview"): _CLI,
+    ("window",): _WINDOW,
+    ("drop-caches",): _DROP_CACHES,
+    ("grant-permissions",): _GRANT,
     ("status",): _STATUS,
     ("memory",): _MEMORY,
     ("gpu",): _GPU,

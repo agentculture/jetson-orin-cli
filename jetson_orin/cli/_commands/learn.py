@@ -31,6 +31,9 @@ Commands
   orin cli overview       Describe the CLI surface itself.
   orin swap               Swap status, per-process history, guarded grow.
   orin monitor            AI-free threshold watchdog that webhooks on alerts.
+  orin window             Benchmark window: show/store/lock/restore clocks + fan.
+  orin drop-caches        sync + clear the page cache (sudo grant).
+  orin grant-permissions  Report/install the passwordless sudo rules.
 
 Machine scope (Jetson Orin host telemetry)
 ------------------------------------------
@@ -89,6 +92,9 @@ def _as_json_payload() -> dict[str, object]:
             {"path": ["power"], "summary": "nvpmodel mode, jetson_clocks state, rail power."},
             {"path": ["swap"], "summary": "Swap status, history, guarded grow."},
             {"path": ["monitor"], "summary": "Threshold watchdog that webhooks on alerts."},
+            {"path": ["window"], "summary": "Benchmark window: show/store/lock/restore."},
+            {"path": ["drop-caches"], "summary": "sync + clear the page cache."},
+            {"path": ["grant-permissions"], "summary": "Report/install passwordless sudo rules."},
         ],
         "exit_codes": {
             "0": "success",
