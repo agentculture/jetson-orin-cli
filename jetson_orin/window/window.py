@@ -1,6 +1,6 @@
 """``window show|store|lock|restore`` and ``drop-caches`` (contract sections 1-5).
 
-State lives in ``${XDG_STATE_HOME:-~/.local/state}/orin/``: ``window.json`` (the
+State lives in ``~/.local/state/orin/``: ``window.json`` (the
 marker: ``locked`` flag) and ``window-clocks.conf`` (the file
 ``jetson_clocks --store`` writes and ``--restore`` reads). Every privileged call
 is ``sudo -n`` so a missing grant fails fast as ``not_granted`` and never prompts.
@@ -32,26 +32,11 @@ _STATE_FILE = "window.json"
 _CLOCKS_FILE = "window-clocks.conf"
 
 
-def _default_state_dir() -> str:
-    return os.path.realpath(os.path.join(os.path.expanduser("~"), ".local", "state", "orin"))
-
-
 def state_dir() -> str:
-    """Sanitised state dir. ``XDG_STATE_HOME`` is untrusted input: it is honoured
-    only when absolute with no ``..`` component, else (or if the resolved path
-    escapes ``$HOME``/the declared base) the default under ``$HOME`` is used."""
-    default = _default_state_dir()
-    raw = os.environ.get("XDG_STATE_HOME") or ""
-    if not raw or not os.path.isabs(raw) or ".." in raw.split(os.sep):
-        return default
-    base = os.path.realpath(raw)
-    cand = os.path.realpath(os.path.join(base, "orin"))
-    try:
-        if os.path.commonpath([base, cand]) != base:
-            return default
-    except ValueError:
-        return default
-    return cand
+    """Always ``~/.local/state/orin`` (realpath). Deliberately NOT derived from
+    ``XDG_STATE_HOME`` or any other environment variable: an env-derived base is
+    a taint source for path-traversal analysis."""
+    return os.path.realpath(Path.home() / ".local" / "state" / "orin")
 
 
 def _state_path(sdir: str) -> Path:

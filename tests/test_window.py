@@ -52,7 +52,7 @@ class Fake:
 
 @pytest.fixture
 def env(tmp_path, monkeypatch):
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
+    monkeypatch.setenv("HOME", str(tmp_path))
     fake = Fake()
     monkeypatch.setattr(wcmd, "_exec", fake)
     monkeypatch.setattr(wmod, "FAN_CONF", str(tmp_path / "no-such-nvfancontrol.conf"))
@@ -92,7 +92,7 @@ def test_store_lock_restore_cycle(env, capsys, tmp_path):
     assert o["action"] == "store"
     assert o["stored"] is True
     assert o["active"] is False
-    clocks = str(tmp_path / "state/orin/window-clocks.conf")
+    clocks = str(tmp_path / ".local/state/orin/window-clocks.conf")
     assert ("sudo", "-n", "/usr/bin/jetson_clocks", "--store", clocks) in env.argvs()
 
     rc, o, _ = run(capsys, "window", "lock")
@@ -354,17 +354,18 @@ def test_fan_profile_from_conf(tmp_path):
     assert rep["fan_profile"] == "quiet"
 
 
-def test_state_dir_rejects_traversal_and_relative(monkeypatch, tmp_path):
+def test_xdg_state_home_is_ignored_by_window_state(monkeypatch, tmp_path):
     from jetson_orin.window import window as win
 
-    default = win._default_state_dir()
-    for bad in ("../x", "rel/path", f"{tmp_path}/a/../b"):
-        monkeypatch.setenv("XDG_STATE_HOME", bad)
-        assert win.state_dir() == default
+    monkeypatch.setenv("HOME", str(tmp_path / "home"))
+    expected = os.path.realpath(str(tmp_path / "home" / ".local" / "state" / "orin"))
+    for xdg in ("../x", "rel/path", str(tmp_path / "xdg")):
+        monkeypatch.setenv("XDG_STATE_HOME", xdg)
+        assert win.state_dir() == expected
 
 
-def test_state_dir_honours_absolute_xdg(monkeypatch, tmp_path):
+def test_state_lives_under_home_local_state(monkeypatch, tmp_path):
     from jetson_orin.window import window as win
 
-    monkeypatch.setenv("XDG_STATE_HOME", str(tmp_path / "state"))
-    assert win.state_dir() == os.path.realpath(str(tmp_path / "state" / "orin"))
+    monkeypatch.setenv("HOME", str(tmp_path))
+    assert win.state_dir() == os.path.realpath(str(tmp_path / ".local" / "state" / "orin"))

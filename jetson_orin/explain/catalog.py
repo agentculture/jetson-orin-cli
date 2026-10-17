@@ -553,7 +553,7 @@ Benchmark window per the machine-CLI contract. `show` is read-only; `store`,
 `lock`, `restore` need the sudo grant (`orin grant-permissions`). `lock` requires
 a prior `store`; `store` refuses with `window_active` while locked; `restore`
 with no stored state is `ok` with `restored: false`. State lives in
-`${XDG_STATE_HOME:-~/.local/state}/orin/`. Nothing persists across a reboot.
+`~/.local/state/orin/`. Nothing persists across a reboot.
 
 ## Usage
 
